@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vite/
+*.log
+.env
+.env.*
+!.env.example
+.idea/
+*.iml
+.git/
+.gitignore
+Dockerfile*
+README*

@@ -1,0 +1,44 @@
+# macOS / editors
+!.gitignore
+!**/.gitignore
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Local AI/tool state
+.claude/
+.codex/
+.agents/
+
+# Secrets and machine-specific environment files
+.env
+.env.*
+!.env.example
+*.local
+
+# Java / Maven
+**/target/
+*.class
+*.log
+
+# Node / Vite
+**/node_modules/
+**/dist/
+**/.vite/
+*.tsbuildinfo
+
+# Runtime data and backups
+data/
+postgres/
+minio/
+meilisearch/
+backup/
+
+# Internal documentation and prototypes are intentionally not published
+docs/
+DEV.md
+WORK_PLAN.md
+html-knowledge-package-platform-design.md
+html-knowledge-package-platform-ui-design.md
+prototype/

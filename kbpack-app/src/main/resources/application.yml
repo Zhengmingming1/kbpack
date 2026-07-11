@@ -1,0 +1,94 @@
+spring:
+  application:
+    name: kbpack
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+  session:
+    store-type: jdbc
+    timeout: 12h
+
+server:
+  port: ${SERVER_PORT:18080}
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        name: KBPACK_SESSION
+        http-only: true
+        same-site: lax
+        secure: ${COOKIE_SECURE:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when_authorized
+
+kbpack:
+  upload:
+    max-package-size-bytes: ${UPLOAD_MAX_PACKAGE_SIZE_BYTES:524288000}
+    max-unpacked-size-bytes: ${UPLOAD_MAX_UNPACKED_SIZE_BYTES:2147483648}
+    max-file-count: ${UPLOAD_MAX_FILE_COUNT:20000}
+    max-single-file-size-bytes: ${UPLOAD_MAX_SINGLE_FILE_SIZE_BYTES:209715200}
+    max-path-length: ${UPLOAD_MAX_PATH_LENGTH:512}
+  parser:
+    max-text-file-bytes: ${PARSER_MAX_TEXT_FILE_BYTES:33554432}
+    max-in-memory-bytes: ${PARSER_MAX_IN_MEMORY_BYTES:268435456}
+  preview:
+    host: ${PREVIEW_HOST:kb-preview.localtest.me}
+    ticket-secret: ${PREVIEW_TICKET_SECRET:dev-preview-ticket-secret-change-me}
+    ticket-ttl-seconds: 60
+    session-ttl-seconds: 1800
+    enforce-host: ${PREVIEW_ENFORCE_HOST:true}
+  task:
+    poll-interval-ms: 3000
+    thread-pool-size: 2
+  storage:
+    minio:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      buckets:
+        original: kb-original
+        packages: kb-packages
+        derived: kb-derived
+        backup: kb-backup
+  search:
+    meilisearch:
+      host: ${MEILI_HOST:http://localhost:7700}
+      api-key: ${MEILI_MASTER_KEY:dev-meili-master-key-change-me}
+      index-uid: kb_chunks
+  init:
+    admin-username: ${INIT_ADMIN_USERNAME:admin}
+    admin-password: ${INIT_ADMIN_PASSWORD:admin123456}
+  app-base-url: ${APP_BASE_URL:http://kb.localtest.me:5173}
+  preview-base-url: ${PREVIEW_BASE_URL:http://kb-preview.localtest.me:18080}
+
+logging:
+  level:
+    root: INFO
+    com.kbpack: INFO

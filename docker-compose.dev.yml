@@ -1,0 +1,64 @@
+# Development dependencies only (no app, no Caddy).
+# Usage: docker compose -f docker-compose.dev.yml up -d
+name: kbpack-dev
+
+services:
+  postgres:
+    image: postgres:16.4
+    container_name: kbpack-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kbpack
+      POSTGRES_USER: kbpack
+      POSTGRES_PASSWORD: kbpack
+    ports:
+      - "5432:5432"
+    volumes:
+      - kbpack-dev-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kbpack -d kbpack"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    container_name: kbpack-dev-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - kbpack-dev-minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.10
+    container_name: kbpack-dev-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_ENV: "development"
+      MEILI_MASTER_KEY: dev-meili-master-key-change-me
+    ports:
+      - "7700:7700"
+    volumes:
+      - kbpack-dev-meili:/meili_data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  kbpack-dev-pg:
+  kbpack-dev-minio:
+  kbpack-dev-meili:
