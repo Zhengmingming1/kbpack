@@ -13,7 +13,7 @@ services:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - "${CADDYFILE_PATH:-./Caddyfile}:/etc/caddy/Caddyfile:ro"
       - ./data/caddy-data:/data
       - ./data/caddy-config:/config
     depends_on:
@@ -73,12 +73,14 @@ services:
       MEILI_HOST: http://meilisearch:7700
       MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:?MEILI_MASTER_KEY is required}"
       PREVIEW_HOST: "${PREVIEW_HOST:-kb-preview.nas.local}"
+      PREVIEW_ENFORCE_HOST: "${PREVIEW_ENFORCE_HOST:-true}"
       PREVIEW_TICKET_SECRET: "${PREVIEW_TICKET_SECRET:?PREVIEW_TICKET_SECRET is required}"
       INIT_ADMIN_USERNAME: "${INIT_ADMIN_USERNAME:-admin}"
       INIT_ADMIN_PASSWORD: "${INIT_ADMIN_PASSWORD:?INIT_ADMIN_PASSWORD is required}"
       APP_BASE_URL: "${APP_BASE_URL:-https://kb.nas.local}"
       PREVIEW_BASE_URL: "${PREVIEW_BASE_URL:-https://kb-preview.nas.local}"
       COOKIE_SECURE: "${COOKIE_SECURE:-true}"
+      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://kb.nas.local}"
       UPLOAD_MAX_PACKAGE_SIZE_BYTES: "${UPLOAD_MAX_PACKAGE_SIZE_BYTES:-524288000}"
       JAVA_TOOL_OPTIONS: "${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=75.0}"
     volumes:

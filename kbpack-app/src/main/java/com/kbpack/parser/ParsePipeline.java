@@ -1,8 +1,9 @@
 package com.kbpack.parser;
 
+import com.kbpack.common.archive.ArchivePaths;
+import com.kbpack.common.config.KbpackProperties;
 import com.kbpack.common.error.ApiException;
 import com.kbpack.common.error.ErrorCode;
-import com.kbpack.common.config.KbpackProperties;
 import com.kbpack.common.id.IdPrefix;
 import com.kbpack.common.storage.ObjectStorageService;
 import com.kbpack.pkg.KnowledgePackage;
@@ -151,6 +152,7 @@ public class ParsePipeline {
     }
 
     private boolean isParseCandidate(PackageAsset asset) {
+        if (ArchivePaths.isPlatformMetadata(asset.getPath())) return false;
         String path = asset.getPath().toLowerCase(java.util.Locale.ROOT);
         return asset.getRole() == PackageAsset.Role.entry
                 || asset.getRole() == PackageAsset.Role.html

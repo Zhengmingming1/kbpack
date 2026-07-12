@@ -1,0 +1,25 @@
+:80 {
+	encode zstd gzip
+
+	@preview path /p/*
+	handle @preview {
+		reverse_proxy app:18080
+	}
+
+	@backend path /api/* /health /health/*
+	handle @backend {
+		reverse_proxy app:18080
+	}
+
+	handle {
+		reverse_proxy web:18080
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+	}
+}

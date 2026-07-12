@@ -12,6 +12,7 @@ import com.kbpack.search.SearchIndexUpdateCoordinator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -27,6 +28,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -96,17 +99,37 @@ class ParsePipelineTest {
         assertThat(archived.getStatus()).isEqualTo(KnowledgePackage.Status.archived);
     }
 
+    @Test
+    void ignoresPlatformMetadataWhenReparsingExistingVersion() {
+        UUID packageId = UUID.randomUUID();
+        UUID versionId = UUID.randomUUID();
+        KnowledgePackage pkg = packageWith(packageId, versionId, KnowledgePackage.Status.active);
+        PackageVersion version = versionWith(packageId, versionId);
+        version.setEntryFile("kb/index.html");
+
+        runPipeline(pkg, version, List.of(
+                asset(versionId, "kb/index.html", PackageAsset.Role.entry, 7),
+                asset(versionId, "__MACOSX/kb/._index.html", PackageAsset.Role.html, 219)
+        ));
+
+        ArgumentCaptor<PackageContext> context = ArgumentCaptor.forClass(PackageContext.class);
+        verify(parserChain).parse(context.capture());
+        assertThat(context.getValue().files()).containsOnlyKeys("kb/index.html");
+        verify(storage, times(1)).readBytes(anyString(), anyString(), anyLong());
+    }
+
     private void runPipeline(KnowledgePackage pkg, PackageVersion version) {
-        PackageAsset asset = new PackageAsset();
-        asset.setVersionId(version.getId());
-        asset.setPath("index.md");
-        asset.setRole(PackageAsset.Role.markdown);
-        asset.setSize(7);
+        runPipeline(pkg, version, List.of(
+                asset(version.getId(), "index.md", PackageAsset.Role.markdown, 7)
+        ));
+    }
+
+    private void runPipeline(KnowledgePackage pkg, PackageVersion version, List<PackageAsset> assets) {
         when(versionRepository.findActiveById(version.getId())).thenReturn(Optional.of(version));
         when(packageRepository.findActiveByIdForUpdate(pkg.getId())).thenReturn(Optional.of(pkg));
         when(versionRepository.findActiveByIdAndPackageIdForUpdate(version.getId(), pkg.getId()))
                 .thenReturn(Optional.of(version));
-        when(assetRepository.findByVersionIdOrderByPathAsc(version.getId())).thenReturn(List.of(asset));
+        when(assetRepository.findByVersionIdOrderByPathAsc(version.getId())).thenReturn(assets);
         when(storage.packagesBucket()).thenReturn("packages");
         when(storage.readBytes(anyString(), anyString(), anyLong()))
                 .thenReturn("content".getBytes(StandardCharsets.UTF_8));
@@ -117,6 +140,15 @@ class ParsePipelineTest {
                 "Detected title", List.of(document), Map.of("score", 1)));
         when(documentRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         pipeline.process(version.getId());
+    }
+
+    private static PackageAsset asset(UUID versionId, String path, PackageAsset.Role role, long size) {
+        PackageAsset asset = new PackageAsset();
+        asset.setVersionId(versionId);
+        asset.setPath(path);
+        asset.setRole(role);
+        asset.setSize(size);
+        return asset;
     }
 
     private KnowledgePackage packageWith(

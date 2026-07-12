@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { login } from '../api/auth';
 import { getApiErrorMessage } from '../api/client';
+import { BRAND_MARK_PATH, BRAND_NAME } from '../brand';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -16,9 +17,9 @@ export function LoginPage() {
     <main className="login-page">
       <section className="login-panel">
         <div className="login-brand">
-          <div className="brand-mark">K</div>
+          <img className="brand-mark" src={BRAND_MARK_PATH} alt="" aria-hidden="true" />
           <div>
-            <Typography.Title level={2}>知识包仓库</Typography.Title>
+            <Typography.Title level={2}>{BRAND_NAME}</Typography.Title>
             <Typography.Text type="secondary">登录以继续管理你的知识资产</Typography.Text>
           </div>
         </div>

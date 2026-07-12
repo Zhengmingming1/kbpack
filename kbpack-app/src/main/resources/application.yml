@@ -88,6 +88,9 @@ kbpack:
   init:
     admin-username: ${INIT_ADMIN_USERNAME:admin}
     admin-password: ${INIT_ADMIN_PASSWORD:admin123456}
+  security:
+    cors:
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://kb.localhost:5173,http://kb.localtest.me:5173}
   app-base-url: ${APP_BASE_URL:http://kb.localtest.me:5173}
   preview-base-url: ${PREVIEW_BASE_URL:http://kb-preview.localtest.me:18080}
 

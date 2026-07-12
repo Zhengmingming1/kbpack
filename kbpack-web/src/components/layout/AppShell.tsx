@@ -16,6 +16,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { logout } from '../../api/auth';
+import { BRAND_MARK_PATH, BRAND_NAME, BRAND_TAGLINE } from '../../brand';
 import { useSession } from '../../hooks/useSession';
 
 const { Sider, Content } = Layout;
@@ -97,10 +98,10 @@ export function AppShell() {
     <Layout className="app-shell">
       <Sider className="desktop-sider" width={240} theme="light" trigger={null}>
         <div className="brand-block">
-          <div className="brand-mark">K</div>
+          <img className="brand-mark" src={BRAND_MARK_PATH} alt="" aria-hidden="true" />
           <div>
-            <Typography.Title level={4}>知识包仓库</Typography.Title>
-            <Typography.Text>Personal archive</Typography.Text>
+            <Typography.Title level={4}>{BRAND_NAME}</Typography.Title>
+            <Typography.Text>{BRAND_TAGLINE}</Typography.Text>
           </div>
         </div>
         <Menu
@@ -114,8 +115,8 @@ export function AppShell() {
       <Layout className="shell-main">
         <header className="topbar">
           <div className="mobile-brand">
-            <div className="brand-mark">K</div>
-            <strong>{title || '知识包仓库'}</strong>
+            <img className="brand-mark" src={BRAND_MARK_PATH} alt="" aria-hidden="true" />
+            <strong>{title || BRAND_NAME}</strong>
           </div>
           <Input
             ref={searchRef}

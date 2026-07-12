@@ -1,6 +1,7 @@
 package com.kbpack.pkg;
 
 import com.kbpack.admin.OperationLogService;
+import com.kbpack.common.archive.ArchivePaths;
 import com.kbpack.common.error.ApiException;
 import com.kbpack.common.error.ErrorCode;
 import com.kbpack.common.id.IdPrefix;
@@ -22,6 +23,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -291,6 +293,15 @@ public class UploadService {
         }
         if (declaredSize > limits.maxSingleFileSizeBytes()) {
             throw new ApiException(ErrorCode.UPLOAD_LIMIT_EXCEEDED, "单文件超过大小限额: " + name);
+        }
+        if (ArchivePaths.isPlatformMetadata(name)) {
+            long copied = copyLimited(input, OutputStream.nullOutputStream(),
+                    limits.maxSingleFileSizeBytes(), ErrorCode.UPLOAD_LIMIT_EXCEEDED);
+            counter.bytes += copied;
+            if (counter.bytes > limits.maxUnpackedSizeBytes()) {
+                throw new ApiException(ErrorCode.UPLOAD_LIMIT_EXCEEDED, "解压后总大小超过 2 GB 限额");
+            }
+            return;
         }
         Path target = root.resolve(name).normalize();
         if (!target.startsWith(root)) {

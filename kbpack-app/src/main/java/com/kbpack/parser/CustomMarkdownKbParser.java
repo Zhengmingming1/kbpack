@@ -27,17 +27,19 @@ public class CustomMarkdownKbParser implements Parser {
 
     @Override
     public boolean canHandle(PackageContext context) {
-        return context.has("index.html") && context.files().keySet().stream()
-                .anyMatch(path -> path.toLowerCase(Locale.ROOT).matches("assets/chapters/.+\\.(?:md|markdown)"));
+        String root = entryRoot(context);
+        return context.has(root + "index.html") && context.files().keySet().stream()
+                .anyMatch(path -> isChapter(path, root));
     }
 
     @Override
     public ParseResult parse(PackageContext context) {
+        String root = entryRoot(context);
         List<String> markdownFiles = context.files().keySet().stream()
-                .filter(path -> path.toLowerCase(Locale.ROOT).matches("assets/chapters/.+\\.(?:md|markdown)"))
+                .filter(path -> isChapter(path, root))
                 .sorted(Comparator.naturalOrder())
                 .toList();
-        List<String> ordered = orderFromContentJs(context, markdownFiles);
+        List<String> ordered = orderFromContentJs(context, root, markdownFiles);
         List<ParsedDocument> documents = new ArrayList<>();
         int index = 1;
         for (String path : ordered) {
@@ -46,16 +48,16 @@ public class CustomMarkdownKbParser implements Parser {
             documents.add(new ParsedDocument(path, MarkdownTools.title(raw, filenameTitle(path)),
                     ExtractedDocument.DocType.markdown, index++, content, raw, MarkdownTools.headings(content)));
         }
-        String indexHtml = context.text("index.html");
+        String indexHtml = context.text(root + "index.html");
         String detectedTitle = indexHtml == null ? null : Jsoup.parse(indexHtml).title();
-        return new ParseResult(detectedTitle, documents, readQualityMeta(context));
+        return new ParseResult(detectedTitle, documents, readQualityMeta(context, root));
     }
 
     @Override
     public int priority() { return 1; }
 
-    private List<String> orderFromContentJs(PackageContext context, List<String> files) {
-        String script = context.text("assets/content.js");
+    private List<String> orderFromContentJs(PackageContext context, String root, List<String> files) {
+        String script = context.text(root + "assets/content.js");
         if (script == null) return files;
         List<String> ordered = new ArrayList<>();
         Matcher matcher = QUOTED_MARKDOWN.matcher(script);
@@ -72,8 +74,8 @@ public class CustomMarkdownKbParser implements Parser {
         return ordered;
     }
 
-    private Map<String, Object> readQualityMeta(PackageContext context) {
-        String json = context.text("assets/chapters/_meta.json");
+    private Map<String, Object> readQualityMeta(PackageContext context, String root) {
+        String json = context.text(root + "assets/chapters/_meta.json");
         if (json == null) return null;
         try {
             return objectMapper.readValue(json, new TypeReference<>() {});
@@ -86,5 +88,24 @@ public class CustomMarkdownKbParser implements Parser {
         String name = path.substring(path.lastIndexOf('/') + 1)
                 .replaceFirst("(?i)\\.(?:md|markdown)$", "");
         return name.replace('-', ' ').replace('_', ' ');
+    }
+
+    private static String entryRoot(PackageContext context) {
+        if (context.version() == null || context.version().getEntryFile() == null) return "";
+        String entry = context.version().getEntryFile().replace('\\', '/');
+        int separator = entry.lastIndexOf('/');
+        return separator < 0 ? "" : entry.substring(0, separator + 1);
+    }
+
+    private static boolean isChapter(String path, String root) {
+        String relative = path;
+        if (!root.isEmpty()) {
+            if (path.length() < root.length()
+                    || !path.regionMatches(true, 0, root, 0, root.length())) {
+                return false;
+            }
+            relative = path.substring(root.length());
+        }
+        return relative.toLowerCase(Locale.ROOT).matches("assets/chapters/.+\\.(?:md|markdown)");
     }
 }

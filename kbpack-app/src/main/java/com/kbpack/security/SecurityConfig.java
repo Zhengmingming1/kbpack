@@ -42,6 +42,7 @@ public class SecurityConfig {
                         || (properties.getPreview().isEnforceHost()
                         && previewHost(request.getServerName(), properties)))
                 .csrf(csrf -> csrf.disable())
+                .cors(Customizer.withDefaults())
                 .securityContext(context -> context.securityContextRepository(new NullSecurityContextRepository()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .requestCache(cache -> cache.disable())
@@ -103,18 +104,14 @@ public class SecurityConfig {
     }
 
     @Bean
-    CorsConfigurationSource corsConfigurationSource() {
+    CorsConfigurationSource corsConfigurationSource(KbpackProperties properties) {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-                "http://kb.localhost:5173",
-                "http://kb.localtest.me:5173"
-        ));
+        config.setAllowedOrigins(properties.getSecurity().getCors().getAllowedOrigins());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
+        config.validateAllowCredentials();
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

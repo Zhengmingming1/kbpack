@@ -1,4 +1,4 @@
-# KBPack
+# 知匣（KBPack）
 
 > 面向个人与家庭 NAS 的 HTML 知识包管理平台。上传 AI 生成的 HTML/ZIP 知识资料，在保留原始页面体验的同时完成内容抽取、全文检索、分类归档与版本管理。
 
@@ -9,7 +9,7 @@
 ![Docker](https://img.shields.io/badge/Docker_Compose-ready-2496ED?logo=docker&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-16A34A)
 
-KBPack 适合保存教程、报告、产品手册、交互式演示等 HTML 知识资料。系统将原始文件存入 MinIO，将结构化元数据存入 PostgreSQL，并把抽取后的章节和文本写入 Meilisearch，最终提供原样预览与阅读模式两种使用方式。
+知匣适合保存教程、报告、产品手册、交互式演示等 HTML 知识资料。系统将原始文件存入 MinIO，将结构化元数据存入 PostgreSQL，并把抽取后的章节和文本写入 Meilisearch，最终提供原样预览与阅读模式两种使用方式。
 
 ## 功能
 
@@ -35,7 +35,7 @@ flowchart LR
     App --> Meilisearch[(Meilisearch)]
 ```
 
-主站与预览站使用同站但不同源的 Host。主站登录 Cookie 不会发送到预览 Host；预览请求使用短期一次性票据换取路径受限的预览 Cookie。
+默认生产拓扑让主站与预览站使用不同源的 Host。主站登录 Cookie 不会发送到预览 Host；预览请求使用短期一次性票据换取路径受限的预览 Cookie。资源受限的个人 NAS 也可以使用单域名兼容模式，让 `/p/*` 与主站复用一条公网穿透，但隔离强度会降低。
 
 ## 技术栈
 
@@ -119,6 +119,10 @@ curl -fsS http://localhost:18080/health/search
 | `MEILI_HOST` | `http://localhost:7700` | Meilisearch 地址 |
 | `APP_BASE_URL` | `http://kb.localtest.me:5173` | 主站访问地址 |
 | `PREVIEW_BASE_URL` | `http://kb-preview.localtest.me:18080` | 隔离预览地址 |
+| `PREVIEW_HOST` | `kb-preview.localtest.me` | 允许提供预览资源的 Host |
+| `PREVIEW_ENFORCE_HOST` | `true` | 是否严格校验预览请求 Host；仅单域名兼容模式设为 `false` |
+| `CORS_ALLOWED_ORIGINS` | `http://kb.localtest.me:5173` | 允许携带凭据访问 API 的精确来源，多个来源用逗号分隔 |
+| `COOKIE_SECURE` | `true` | 生产环境登录 Cookie 仅通过 HTTPS 发送 |
 | `PREVIEW_TICKET_SECRET` | 仅开发默认值 | 生产环境必须使用强随机值 |
 | `INIT_ADMIN_PASSWORD` | `admin123456` | 仅首次初始化用户表时生效 |
 
@@ -151,6 +155,8 @@ cp .env.example .env
 openssl rand -base64 48
 ```
 
+### 双域名模式（推荐）
+
 配置主站与预览站域名、DNS 和 HTTPS 后启动：
 
 ```bash
@@ -159,7 +165,27 @@ docker compose up -d --build
 docker compose ps
 ```
 
-生产拓扑包含 Caddy、前端、后端、PostgreSQL、MinIO 和 Meilisearch。Caddy 仅在主站暴露 API，并将用户 HTML 限制在独立预览 Host 下。
+生产拓扑包含 Caddy、前端、后端、PostgreSQL、MinIO 和 Meilisearch。默认 `Caddyfile` 仅在主站暴露 API，并将用户 HTML 限制在独立预览 Host 下。
+
+### 单条公网穿透兼容模式
+
+当公网服务只能提供一条 HTTPS 穿透时，可以让主站和预览共同使用 `https://kb.example.com`，并将该入口转发到 NAS 的单个 HTTP 端口。`Caddyfile.single-origin` 会在同一监听端口上把 `/p/*` 转发到后端、把 `/api/*` 和 `/health*` 转发到后端，其余请求转发到前端。
+
+```dotenv
+CADDYFILE_PATH=./Caddyfile.single-origin
+HTTP_PORT=28080
+APP_HOST=kb.example.com
+PREVIEW_HOST=kb.example.com
+APP_BASE_URL=https://kb.example.com
+PREVIEW_BASE_URL=https://kb.example.com
+PREVIEW_ENFORCE_HOST=false
+CORS_ALLOWED_ORIGINS=https://kb.example.com
+COOKIE_SECURE=true
+```
+
+公网穿透只需配置一条映射：`https://kb.example.com` -> `http://<nas-ip>:28080`，无需再为预览开放第二条公网映射。该示例假定 HTTPS 在穿透服务终止；穿透应保留浏览器的 Host 和 Origin，若服务会改写它们，只能对可信转发节点增加精确的恢复规则。修改配置并重新部署后，预览票据接口返回的地址应以 `https://kb.example.com/p/` 开头；旧页面可能保留旧票据，需要强制刷新或重新打开详情页。
+
+此模式让用户上传的 HTML 与管理界面同源，只适合个人使用且内容来源可信的部署。需要接收不可信 HTML 时，应使用默认的独立预览域名模式。
 
 ## 项目结构
 
@@ -171,14 +197,15 @@ docker compose ps
 |-- scripts/               # 健康检查、备份与恢复脚本
 |-- docker-compose.dev.yml # 本地开发依赖
 |-- docker-compose.yml     # 完整生产部署
-`-- Caddyfile              # 主站与预览站路由
+|-- Caddyfile              # 双域名主站与预览站路由
+`-- Caddyfile.single-origin # 单域名单穿透兼容路由
 ```
 
 ## 安全说明
 
 - 不要把 `.env`、真实密码、NAS 地址或备份文件提交到 Git。
 - 生产环境必须启用 HTTPS，并设置 `COOKIE_SECURE=true`。
-- 用户上传的 HTML 可能包含不可信脚本，必须保留独立预览 Host 和票据校验。
+- 用户上传的 HTML 可能包含不可信脚本；不可信内容必须使用独立预览 Host 和票据校验，单域名兼容模式仅用于可信内容。
 - 默认开发账号和固定开发密钥只适用于本机环境。
 - 定期备份 PostgreSQL、MinIO 数据和生产环境配置，并验证恢复流程。
 

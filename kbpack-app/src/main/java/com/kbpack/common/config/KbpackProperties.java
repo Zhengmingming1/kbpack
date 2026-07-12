@@ -2,6 +2,8 @@ package com.kbpack.common.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.List;
+
 @ConfigurationProperties(prefix = "kbpack")
 public class KbpackProperties {
 
@@ -12,6 +14,7 @@ public class KbpackProperties {
     private final Storage storage = new Storage();
     private final Search search = new Search();
     private final Init init = new Init();
+    private final Security security = new Security();
     private String appBaseUrl = "http://localhost:5173";
     private String previewBaseUrl = "http://localhost:18080";
 
@@ -39,6 +42,10 @@ public class KbpackProperties {
 
     public Init getInit() {
         return init;
+    }
+
+    public Security getSecurity() {
+        return security;
     }
 
     public String getAppBaseUrl() {
@@ -300,6 +307,35 @@ public class KbpackProperties {
 
         public void setAdminPassword(String adminPassword) {
             this.adminPassword = adminPassword;
+        }
+    }
+
+    public static class Security {
+        private final Cors cors = new Cors();
+
+        public Cors getCors() {
+            return cors;
+        }
+
+        public static class Cors {
+            private List<String> allowedOrigins = List.of(
+                    "http://localhost:5173",
+                    "http://127.0.0.1:5173",
+                    "http://kb.localhost:5173",
+                    "http://kb.localtest.me:5173"
+            );
+
+            public List<String> getAllowedOrigins() {
+                return allowedOrigins;
+            }
+
+            public void setAllowedOrigins(List<String> allowedOrigins) {
+                this.allowedOrigins = allowedOrigins == null ? List.of() : allowedOrigins.stream()
+                        .map(String::trim)
+                        .filter(origin -> !origin.isBlank())
+                        .distinct()
+                        .toList();
+            }
         }
     }
 }
