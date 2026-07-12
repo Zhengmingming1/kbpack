@@ -1,6 +1,6 @@
 # 知匣（KBPack）
 
-> 面向个人与家庭 NAS 的 HTML 知识包管理平台。上传 AI 生成的 HTML/ZIP 知识资料，在保留原始页面体验的同时完成内容抽取、全文检索、分类归档与版本管理。
+> 面向个人的 HTML 知识包管理平台。上传 AI 生成的 HTML/ZIP 知识资料，在保留原始页面体验的同时完成内容抽取、全文检索、分类归档与版本管理。
 
 ![Java](https://img.shields.io/badge/Java-21-E76F00?logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.3-6DB33F?logo=springboot&logoColor=white)
