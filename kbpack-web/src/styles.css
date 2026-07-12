@@ -947,6 +947,24 @@ a {
   line-height: 1.65;
 }
 
+.reader-content-text {
+  width: min(calc(100% - 40px), 1100px);
+}
+
+.reader-content .reader-plain-text {
+  margin: 0;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #1f2937;
+  background: var(--paper);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre;
+  tab-size: 4;
+}
+
 .reader-content code:not(pre code) {
   padding: 2px 5px;
   border-radius: 4px;

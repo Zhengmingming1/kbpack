@@ -1,20 +1,46 @@
 import { ArrowLeftOutlined, EyeOutlined, LeftOutlined, MenuOutlined, RightOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { Button, Drawer, List, Space, Typography } from 'antd';
-import { Children, createElement, isValidElement, type ReactNode, useState } from 'react';
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getApiErrorMessage } from '../api/client';
-import { getDocument } from '../api/versions';
+import { getDocument, type DocumentDetail } from '../api/versions';
 import { ErrorBlock, LoadingBlock } from '../components/common/QueryState';
 import { resolvePackageAssetUrl } from '../utils/packageAssetUrl';
 
-function nodeText(node: ReactNode): string {
-  return Children.toArray(node).map((child) => {
-    if (typeof child === 'string' || typeof child === 'number') return String(child);
-    return isValidElement<{ children?: ReactNode }>(child) ? nodeText(child.props.children) : '';
-  }).join('');
+interface MarkdownAstNode {
+  type: string;
+  children?: MarkdownAstNode[];
+  data?: {
+    hProperties?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+}
+
+function headingIdPlugin(headings: NonNullable<DocumentDetail['heading_tree']>) {
+  return () => (tree: MarkdownAstNode) => {
+    let headingIndex = 0;
+
+    const visit = (node: MarkdownAstNode) => {
+      if (node.type === 'heading') {
+        const heading = headings[headingIndex++];
+        if (heading) {
+          node.data = {
+            ...node.data,
+            hProperties: {
+              ...node.data?.hProperties,
+              id: heading.anchor,
+            },
+          };
+        }
+      }
+      node.children?.forEach(visit);
+    };
+
+    visit(tree);
+  };
 }
 
 export function ReaderPage() {
@@ -39,11 +65,7 @@ export function ReaderPage() {
   }
 
   const data = documentQuery.data;
-  const heading = (level: 1 | 2 | 3 | 4 | 5 | 6) => ({ children }: { children?: ReactNode }) => {
-    const text = nodeText(children);
-    const match = data.heading_tree?.find((item) => item.level === level && item.text === text);
-    return createElement(`h${level}`, { id: match?.anchor }, children);
-  };
+  const isPlainText = data.doc_type === 'text';
 
   return (
     <main className="reader-page">
@@ -67,36 +89,35 @@ export function ReaderPage() {
         </Space>
       </header>
 
-      <article className="reader-content">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            h1: heading(1),
-            h2: heading(2),
-            h3: heading(3),
-            h4: heading(4),
-            h5: heading(5),
-            h6: heading(6),
-            a: ({ href, children }) => (
-              <a
-                href={resolvePackageAssetUrl(href, data.source_path, data.version_id)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {children}
-              </a>
-            ),
-            img: ({ src, alt }) => (
-              <img
-                src={resolvePackageAssetUrl(src, data.source_path, data.version_id)}
-                alt={alt || ''}
-                loading="lazy"
-              />
-            ),
-          }}
-        >
-          {data.content || ''}
-        </ReactMarkdown>
+      <article className={`reader-content${isPlainText ? ' reader-content-text' : ''}`}>
+        {isPlainText ? (
+          <pre className="reader-plain-text">{data.content || ''}</pre>
+        ) : (
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, headingIdPlugin(data.heading_tree || [])]}
+            components={{
+              a: ({ href, children }) => (
+                <a
+                  href={resolvePackageAssetUrl(href, data.source_path, data.version_id)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {children}
+                </a>
+              ),
+              img: ({ src, alt }) => (
+                <img
+                  src={resolvePackageAssetUrl(src, data.source_path, data.version_id)}
+                  alt={alt || ''}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+              ),
+            }}
+          >
+            {data.content || ''}
+          </ReactMarkdown>
+        )}
       </article>
 
       <footer className="reader-footer">

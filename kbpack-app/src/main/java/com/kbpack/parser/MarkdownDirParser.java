@@ -12,20 +12,27 @@ import java.util.Locale;
 public class MarkdownDirParser implements Parser {
     @Override
     public boolean canHandle(PackageContext context) {
-        return context.files().keySet().stream().anyMatch(path -> path.toLowerCase(Locale.ROOT).endsWith(".md"));
+        boolean hasMarkdown = context.files().keySet().stream().anyMatch(MarkdownTools::isMarkdownPath);
+        if (!hasMarkdown) return false;
+
+        String entryFile = context.version() == null ? null : context.version().getEntryFile();
+        if (entryFile == null || entryFile.isBlank()) return true;
+        String normalizedEntry = entryFile.toLowerCase(Locale.ROOT);
+        return !normalizedEntry.endsWith(".html") && !normalizedEntry.endsWith(".htm");
     }
 
     @Override
     public ParseResult parse(PackageContext context) {
         List<String> paths = context.files().keySet().stream()
-                .filter(path -> path.toLowerCase(Locale.ROOT).endsWith(".md"))
+                .filter(MarkdownTools::isMarkdownPath)
                 .sorted(Comparator.naturalOrder()).toList();
         List<ParsedDocument> documents = new ArrayList<>();
         int order = 1;
         for (String path : paths) {
             String raw = new String(context.files().get(path), StandardCharsets.UTF_8);
             String content = MarkdownTools.stripFrontMatter(raw);
-            String fallback = path.substring(path.lastIndexOf('/') + 1).replaceFirst("(?i)\\.md$", "");
+            String fallback = path.substring(path.lastIndexOf('/') + 1)
+                    .replaceFirst("(?i)\\.(?:md|markdown)$", "");
             documents.add(new ParsedDocument(path, MarkdownTools.title(raw, fallback),
                     ExtractedDocument.DocType.markdown, order++, content, raw, MarkdownTools.headings(content)));
         }

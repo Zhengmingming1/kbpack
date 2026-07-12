@@ -1,18 +1,25 @@
 package com.kbpack.parser;
 
+import com.vladsch.flexmark.ast.Heading;
+import com.vladsch.flexmark.util.ast.TextCollectingVisitor;
+
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 final class MarkdownTools {
-    private static final Pattern HEADING = Pattern.compile("(?m)^(#{1,6})\\s+(.+?)\\s*$");
+    private static final com.vladsch.flexmark.parser.Parser MARKDOWN_PARSER =
+            com.vladsch.flexmark.parser.Parser.builder().build();
 
     private MarkdownTools() {}
+
+    static boolean isMarkdownPath(String path) {
+        String normalized = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        return normalized.endsWith(".md") || normalized.endsWith(".markdown");
+    }
 
     static String stripFrontMatter(String markdown) {
         String normalized = markdown == null ? "" : markdown.replace("\r\n", "\n");
@@ -22,26 +29,43 @@ final class MarkdownTools {
     }
 
     static String title(String markdown, String fallback) {
-        Matcher matcher = HEADING.matcher(stripFrontMatter(markdown));
-        return matcher.find() ? matcher.group(2).replaceAll("\\s+#+$", "").trim() : fallback;
+        List<HeadingInfo> headings = headingInfos(stripFrontMatter(markdown));
+        return headings.isEmpty() ? fallback : headings.getFirst().text();
     }
 
     static List<Map<String, Object>> headings(String markdown) {
         List<Map<String, Object>> result = new ArrayList<>();
-        Map<String, Integer> seen = new LinkedHashMap<>();
-        Matcher matcher = HEADING.matcher(markdown == null ? "" : markdown);
-        while (matcher.find()) {
-            String text = matcher.group(2).replaceAll("\\s+#+$", "").trim();
-            String base = slug(text);
-            int count = seen.merge(base, 1, Integer::sum);
+        for (HeadingInfo heading : headingInfos(markdown)) {
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("level", matcher.group(1).length());
-            item.put("text", text);
-            item.put("anchor", count == 1 ? base : base + "-" + count);
+            item.put("level", heading.level());
+            item.put("text", heading.text());
+            item.put("anchor", heading.anchor());
             result.add(item);
         }
         return result;
     }
+
+    static List<HeadingInfo> headingInfos(String markdown) {
+        List<HeadingInfo> result = new ArrayList<>();
+        Map<String, Integer> seen = new LinkedHashMap<>();
+        TextCollectingVisitor textCollector = new TextCollectingVisitor();
+        for (var node : MARKDOWN_PARSER.parse(markdown == null ? "" : markdown).getDescendants()) {
+            if (!(node instanceof Heading heading)) continue;
+            String text = textCollector.collectAndGetText(heading).trim();
+            String base = slug(text);
+            int count = seen.merge(base, 1, Integer::sum);
+            result.add(new HeadingInfo(
+                    heading.getLevel(),
+                    text,
+                    count == 1 ? base : base + "-" + count,
+                    heading.getStartOffset(),
+                    heading.getEndOffset()
+            ));
+        }
+        return result;
+    }
+
+    record HeadingInfo(int level, String text, String anchor, int startOffset, int endOffset) {}
 
     static String slug(String input) {
         String value = Normalizer.normalize(input == null ? "section" : input, Normalizer.Form.NFKC)

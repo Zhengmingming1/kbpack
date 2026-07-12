@@ -22,10 +22,12 @@ export interface FileNode {
   children?: FileNode[];
 }
 
+export type DocumentType = 'markdown' | 'html' | 'content_js' | 'text';
+
 export interface DocumentSummary {
   id: string;
   title: string;
-  doc_type: string;
+  doc_type: DocumentType;
   order_no: number;
   word_count?: number;
 }

@@ -4,15 +4,12 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Component
 public class ChunkSplitter {
     static final int TARGET_SIZE = 500;
     static final int OVERLAP = 50;
     static final int MIN_SIZE = 30;
-    private static final Pattern HEADING = Pattern.compile("(?m)^#{1,6}\\s+(.+?)\\s*$");
 
     public record ChunkPart(String heading, String content, String anchor) {}
 
@@ -81,18 +78,17 @@ public class ChunkSplitter {
 
     private List<Section> sections(String content, String defaultHeading) {
         List<Section> result = new ArrayList<>();
-        Matcher matcher = HEADING.matcher(content);
         int cursor = 0;
         String heading = defaultHeading;
         String anchor = MarkdownTools.slug(defaultHeading);
-        while (matcher.find()) {
-            if (matcher.start() > cursor) {
-                String section = content.substring(cursor, matcher.start()).trim();
+        for (MarkdownTools.HeadingInfo headingInfo : MarkdownTools.headingInfos(content)) {
+            if (headingInfo.startOffset() > cursor) {
+                String section = content.substring(cursor, headingInfo.startOffset()).trim();
                 if (!section.isBlank()) result.add(new Section(heading, anchor, section));
             }
-            heading = matcher.group(1).replaceAll("\\s+#+$", "").trim();
-            anchor = MarkdownTools.slug(heading);
-            cursor = matcher.end();
+            heading = headingInfo.text();
+            anchor = headingInfo.anchor();
+            cursor = headingInfo.endOffset();
         }
         if (cursor < content.length()) {
             String section = content.substring(cursor).trim();

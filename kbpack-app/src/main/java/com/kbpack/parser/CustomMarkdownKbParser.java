@@ -17,7 +17,8 @@ import java.util.regex.Pattern;
 
 @Component
 public class CustomMarkdownKbParser implements Parser {
-    private static final Pattern QUOTED_MARKDOWN = Pattern.compile("['\"]([^'\"]+\\.md)['\"]", Pattern.CASE_INSENSITIVE);
+    private static final Pattern QUOTED_MARKDOWN = Pattern.compile(
+            "['\"]([^'\"]+\\.(?:md|markdown))['\"]", Pattern.CASE_INSENSITIVE);
     private final ObjectMapper objectMapper;
 
     public CustomMarkdownKbParser(ObjectMapper objectMapper) {
@@ -27,13 +28,13 @@ public class CustomMarkdownKbParser implements Parser {
     @Override
     public boolean canHandle(PackageContext context) {
         return context.has("index.html") && context.files().keySet().stream()
-                .anyMatch(path -> path.toLowerCase(Locale.ROOT).matches("assets/chapters/.+\\.md"));
+                .anyMatch(path -> path.toLowerCase(Locale.ROOT).matches("assets/chapters/.+\\.(?:md|markdown)"));
     }
 
     @Override
     public ParseResult parse(PackageContext context) {
         List<String> markdownFiles = context.files().keySet().stream()
-                .filter(path -> path.toLowerCase(Locale.ROOT).matches("assets/chapters/.+\\.md"))
+                .filter(path -> path.toLowerCase(Locale.ROOT).matches("assets/chapters/.+\\.(?:md|markdown)"))
                 .sorted(Comparator.naturalOrder())
                 .toList();
         List<String> ordered = orderFromContentJs(context, markdownFiles);
@@ -82,7 +83,8 @@ public class CustomMarkdownKbParser implements Parser {
     }
 
     private static String filenameTitle(String path) {
-        String name = path.substring(path.lastIndexOf('/') + 1).replaceFirst("\\.md$", "");
+        String name = path.substring(path.lastIndexOf('/') + 1)
+                .replaceFirst("(?i)\\.(?:md|markdown)$", "");
         return name.replace('-', ' ').replace('_', ' ');
     }
 }

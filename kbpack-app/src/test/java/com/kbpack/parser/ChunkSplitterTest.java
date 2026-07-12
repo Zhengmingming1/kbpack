@@ -75,6 +75,24 @@ class ChunkSplitterTest {
         assertEquals("a".repeat(40) + "\n\ntiny", chunks.getFirst().content());
     }
 
+    @Test
+    void ignoresHeadingSyntaxInsideFencedCode() {
+        String content = """
+                ```markdown
+                # Not a section
+                This is code content long enough to remain its own chunk.
+                ```
+
+                # Real section
+                This is the real section body and it is also long enough to remain separate.
+                """;
+
+        List<ChunkSplitter.ChunkPart> chunks = splitter.split(document("Document", content));
+
+        assertTrue(chunks.stream().anyMatch(chunk -> chunk.heading().equals("Real section")));
+        assertFalse(chunks.stream().anyMatch(chunk -> chunk.heading().equals("Not a section")));
+    }
+
     private static ParsedDocument document(String title, String content) {
         return new ParsedDocument(
                 "chapter.md",
