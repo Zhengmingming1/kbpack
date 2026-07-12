@@ -94,7 +94,7 @@ compose run --rm --no-deps \
     minio-client '
         set -eu
         mc alias set kbpack http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
-        for bucket in kb-original kb-packages kb-derived; do
+        for bucket in kb-original kb-packages kb-derived kb-backup; do
             mkdir -p "/backup/$bucket"
             mc mirror --overwrite "kbpack/$bucket" "/backup/$bucket"
         done

@@ -86,7 +86,7 @@ public class PreviewTicketController {
                 request.getRemoteAddr());
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("ticket", ticket);
-        result.put("expires_in", properties.getPreview().getTicketTtlSeconds());
+        result.put("expires_in", ticketService.ticketTtlSeconds());
         result.put("preview_url", url);
         return result;
     }

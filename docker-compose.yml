@@ -40,7 +40,7 @@ services:
     container_name: kbpack-web
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:18080/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18080/healthz"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -169,7 +169,7 @@ services:
     volumes:
       - ./meilisearch:/meili_data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:7700/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7700/health"]
       interval: 10s
       timeout: 5s
       retries: 10

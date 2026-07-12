@@ -14,6 +14,8 @@ public interface PackageTagRepository extends JpaRepository<PackageTag, PackageT
 
     List<PackageTag> findAllByIdPackageIdIn(Collection<UUID> packageIds);
 
+    List<PackageTag> findAllByIdTagId(UUID tagId);
+
     boolean existsByIdPackageIdAndIdTagId(UUID packageId, UUID tagId);
 
     long countByIdTagId(UUID tagId);

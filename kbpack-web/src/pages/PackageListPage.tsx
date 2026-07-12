@@ -27,6 +27,7 @@ import { listTags } from '../api/tags';
 import { EmptyBlock, ErrorBlock, LoadingBlock } from '../components/common/QueryState';
 import { PackageCard } from '../components/package/PackageCard';
 import { PackageTable } from '../components/package/PackageTable';
+import { PACKAGE_SOURCE_OPTIONS, PACKAGE_STATUS_OPTIONS } from '../constants/packageOptions';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useUiStore } from '../stores/uiStore';
 
@@ -125,12 +126,7 @@ export function PackageListPage() {
           placeholder="全部状态"
           value={params.get('status') || undefined}
           onChange={(value) => updateParam('status', value)}
-          options={[
-            { value: 'active', label: '可用' },
-            { value: 'draft', label: '草稿' },
-            { value: 'archived', label: '已归档' },
-            { value: 'failed', label: '解析失败' },
-          ]}
+          options={PACKAGE_STATUS_OPTIONS}
         />
       </label>
       <label>
@@ -140,11 +136,7 @@ export function PackageListPage() {
           placeholder="全部来源"
           value={params.get('source') || undefined}
           onChange={(value) => updateParam('source', value)}
-          options={[
-            { value: 'manual', label: '手工上传' },
-            { value: 'ai_generated', label: 'AI 生成' },
-            { value: 'imported', label: '外部导入' },
-          ]}
+          options={PACKAGE_SOURCE_OPTIONS}
         />
       </label>
       <Checkbox

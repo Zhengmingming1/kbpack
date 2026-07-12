@@ -32,6 +32,7 @@ export interface DocumentSummary {
 
 export interface DocumentDetail extends DocumentSummary {
   content: string;
+  source_path?: string;
   heading_tree?: Array<{ level: number; text: string; anchor: string }>;
   prev_document_id?: string | null;
   next_document_id?: string | null;

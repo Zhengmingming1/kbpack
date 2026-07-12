@@ -1,0 +1,6 @@
+# Image-only override for NAS deployments using preloaded release images.
+services:
+  web:
+    build: !reset null
+  app:
+    build: !reset null

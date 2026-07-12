@@ -184,7 +184,7 @@ wait_for_minio || die "MinIO did not become ready"
 printf 'Restoring PostgreSQL...\n'
 gzip -dc "$POSTGRES_BACKUP" \
     | compose exec -T postgres sh -ec \
-        'exec psql --set ON_ERROR_STOP=on --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"'
+        'exec psql --set ON_ERROR_STOP=on --single-transaction --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --file=-'
 
 if [[ "$SKIP_MINIO" == false ]]; then
     printf 'Restoring MinIO buckets...\n'
@@ -193,7 +193,7 @@ if [[ "$SKIP_MINIO" == false ]]; then
         minio-client '
             set -eu
             mc alias set kbpack http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
-            for bucket in kb-original kb-packages kb-derived; do
+            for bucket in kb-original kb-packages kb-derived kb-backup; do
                 mc mb --ignore-existing "kbpack/$bucket" >/dev/null
                 mc mirror --overwrite --remove "/backup/$bucket" "kbpack/$bucket"
             done

@@ -5,6 +5,9 @@ import com.meilisearch.sdk.Client;
 import com.meilisearch.sdk.Config;
 import com.meilisearch.sdk.Index;
 import com.meilisearch.sdk.model.Settings;
+import com.meilisearch.sdk.model.Task;
+import com.meilisearch.sdk.model.TaskInfo;
+import com.meilisearch.sdk.model.TaskStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationRunner;
@@ -29,12 +32,14 @@ public class MeilisearchConfig {
         return args -> {
             String uid = properties.getSearch().getMeilisearch().getIndexUid();
             try {
+                Index index;
                 try {
-                    client.createIndex(uid, "id");
-                } catch (Exception ignored) {
-                    // already exists
+                    index = client.getIndex(uid);
+                } catch (Exception missing) {
+                    TaskInfo creation = client.createIndex(uid, "id");
+                    waitForSuccessfulTask(client, client.index(uid), creation.getTaskUid(), properties);
+                    index = client.getIndex(uid);
                 }
-                Index index = client.index(uid);
                 Settings settings = new Settings();
                 settings.setSearchableAttributes(new String[]{
                         "content_enhanced", "heading", "document_title", "package_title", "tags"
@@ -47,11 +52,33 @@ public class MeilisearchConfig {
                         "id", "package_id", "version_id", "document_id", "document_title", "heading",
                         "content", "package_title", "tags", "anchor", "updated_at", "preview_url"
                 });
-                index.updateSettings(settings);
+                TaskInfo settingsUpdate = index.updateSettings(settings);
+                waitForSuccessfulTask(client, index, settingsUpdate.getTaskUid(), properties);
                 log.info("Meilisearch index '{}' settings applied", uid);
             } catch (Exception e) {
                 log.error("Failed to initialize Meilisearch index {}: {}", uid, e.getMessage());
             }
         };
+    }
+
+    private static int taskTimeoutMillis(KbpackProperties properties) {
+        long seconds = Math.min(Integer.MAX_VALUE / 1_000L,
+                Math.max(30, properties.getSearch().getMeilisearch().getTaskTimeoutSeconds()));
+        return Math.toIntExact(seconds * 1_000);
+    }
+
+    private static void waitForSuccessfulTask(
+            Client client,
+            Index index,
+            int taskUid,
+            KbpackProperties properties
+    ) throws Exception {
+        index.waitForTask(taskUid, taskTimeoutMillis(properties), 50);
+        Task task = client.getTask(taskUid);
+        if (task.getStatus() != TaskStatus.SUCCEEDED) {
+            String message = task.getError() == null
+                    ? String.valueOf(task.getStatus()) : task.getError().getMessage();
+            throw new IllegalStateException("Meilisearch task " + taskUid + " did not succeed: " + message);
+        }
     }
 }

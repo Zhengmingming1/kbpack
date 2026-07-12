@@ -10,7 +10,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 public class ParseTaskExecutorConfig {
     @Bean("parseTaskExecutor")
     ThreadPoolTaskExecutor parseTaskExecutor(KbpackProperties properties) {
-        int size = Math.max(1, properties.getTask().getThreadPoolSize());
+        int size = Math.min(64, Math.max(1, properties.getTask().getThreadPoolSize()));
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(size);
         executor.setMaxPoolSize(size);

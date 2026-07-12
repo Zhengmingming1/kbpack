@@ -24,6 +24,7 @@ public class DeletedPackageCleanupService {
     private final ObjectStorageService storage;
     private final SearchIndexService searchIndexService;
     private final TransactionTemplate transactionTemplate;
+    private final RuntimeSettingService runtimeSettings;
 
     public DeletedPackageCleanupService(
             CleanupPackageRepository packageRepository,
@@ -31,7 +32,8 @@ public class DeletedPackageCleanupService {
             PackageAssetRepository assetRepository,
             ObjectStorageService storage,
             SearchIndexService searchIndexService,
-            TransactionTemplate transactionTemplate
+            TransactionTemplate transactionTemplate,
+            RuntimeSettingService runtimeSettings
     ) {
         this.packageRepository = packageRepository;
         this.versionRepository = versionRepository;
@@ -39,11 +41,12 @@ public class DeletedPackageCleanupService {
         this.storage = storage;
         this.searchIndexService = searchIndexService;
         this.transactionTemplate = transactionTemplate;
+        this.runtimeSettings = runtimeSettings;
     }
 
     @Scheduled(cron = "${kbpack.cleanup.cron:0 20 3 * * *}")
     public void scheduledCleanup() {
-        cleanupBefore(Instant.now().minus(30, ChronoUnit.DAYS));
+        cleanupBefore(Instant.now().minus(runtimeSettings.cleanupRetentionDays(), ChronoUnit.DAYS));
     }
 
     public int cleanupBefore(Instant cutoff) {

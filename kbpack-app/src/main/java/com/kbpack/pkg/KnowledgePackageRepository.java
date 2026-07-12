@@ -1,9 +1,11 @@
 package com.kbpack.pkg;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -18,6 +20,10 @@ public interface KnowledgePackageRepository extends JpaRepository<KnowledgePacka
 
     @Query("select p from KnowledgePackage p where p.id = :id and p.deletedAt is null")
     Optional<KnowledgePackage> findActiveById(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from KnowledgePackage p where p.id = :id and p.deletedAt is null")
+    Optional<KnowledgePackage> findActiveByIdForUpdate(@Param("id") UUID id);
 
     boolean existsBySlug(String slug);
 

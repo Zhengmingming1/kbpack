@@ -3,6 +3,7 @@ package com.kbpack.pkg;
 import com.kbpack.admin.OperationLogService;
 import com.kbpack.common.error.ApiException;
 import com.kbpack.common.error.ErrorCode;
+import com.kbpack.search.SearchIndexUpdateCoordinator;
 import com.kbpack.user.AppUser;
 import org.springframework.data.domain.Sort;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -20,17 +21,20 @@ public class TagService {
     private final PackageTagRepository packageTagRepository;
     private final PackageAccessService accessService;
     private final OperationLogService operationLogService;
+    private final SearchIndexUpdateCoordinator searchIndexUpdates;
 
     public TagService(
             TagRepository tagRepository,
             PackageTagRepository packageTagRepository,
             PackageAccessService accessService,
-            OperationLogService operationLogService
+            OperationLogService operationLogService,
+            SearchIndexUpdateCoordinator searchIndexUpdates
     ) {
         this.tagRepository = tagRepository;
         this.packageTagRepository = packageTagRepository;
         this.accessService = accessService;
         this.operationLogService = operationLogService;
+        this.searchIndexUpdates = searchIndexUpdates;
     }
 
     @Transactional(readOnly = true)
@@ -63,10 +67,13 @@ public class TagService {
         accessService.requireContentWriter(actor);
         Tag tag = tagRepository.findById(tagId)
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "标签不存在"));
+        List<UUID> affectedPackages = packageTagRepository.findAllByIdTagId(tagId).stream()
+                .map(link -> link.getId().getPackageId()).toList();
         tagRepository.delete(tag);
         operationLogService.record(
                 actor.getId(), "tag.delete", "tag", tagId, Map.of("name", tag.getName()), ip
         );
+        searchIndexUpdates.refreshPackagesAfterCommit(affectedPackages);
     }
 
     @Transactional(readOnly = true)

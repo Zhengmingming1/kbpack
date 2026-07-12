@@ -8,10 +8,11 @@ import com.kbpack.pkg.PackageAsset;
 import com.kbpack.pkg.PackageAssetRepository;
 import com.kbpack.pkg.PackageVersion;
 import com.kbpack.pkg.PackageVersionRepository;
-import com.kbpack.search.SearchIndexService;
+import com.kbpack.search.SearchIndexUpdateCoordinator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -25,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -37,7 +39,7 @@ class ParsePipelineTest {
     @Mock private SearchChunkRepository chunkRepository;
     @Mock private ObjectStorageService storage;
     @Mock private ParserChain parserChain;
-    @Mock private SearchIndexService searchIndexService;
+    @Mock private SearchIndexUpdateCoordinator searchIndexUpdates;
 
     private ParsePipeline pipeline;
 
@@ -52,7 +54,7 @@ class ParsePipelineTest {
                 storage,
                 parserChain,
                 new ChunkSplitter(),
-                searchIndexService,
+                searchIndexUpdates,
                 new KbpackProperties());
     }
 
@@ -70,6 +72,9 @@ class ParsePipelineTest {
         assertThat(pkg.getCurrentVersionId()).isEqualTo(currentVersionId);
         assertThat(pkg.getStatus()).isEqualTo(KnowledgePackage.Status.archived);
         assertThat(pkg.getQualityMeta()).isSameAs(originalQuality);
+        InOrder locks = inOrder(packageRepository, versionRepository);
+        locks.verify(packageRepository).findActiveByIdForUpdate(packageId);
+        locks.verify(versionRepository).findActiveByIdAndPackageIdForUpdate(historicalVersionId, packageId);
         assertThat(pkg.getTitle()).isEqualTo("未命名知识包");
     }
 
@@ -98,7 +103,9 @@ class ParsePipelineTest {
         asset.setRole(PackageAsset.Role.markdown);
         asset.setSize(7);
         when(versionRepository.findActiveById(version.getId())).thenReturn(Optional.of(version));
-        when(packageRepository.findActiveById(pkg.getId())).thenReturn(Optional.of(pkg));
+        when(packageRepository.findActiveByIdForUpdate(pkg.getId())).thenReturn(Optional.of(pkg));
+        when(versionRepository.findActiveByIdAndPackageIdForUpdate(version.getId(), pkg.getId()))
+                .thenReturn(Optional.of(version));
         when(assetRepository.findByVersionIdOrderByPathAsc(version.getId())).thenReturn(List.of(asset));
         when(storage.packagesBucket()).thenReturn("packages");
         when(storage.readBytes(anyString(), anyString(), anyLong()))
@@ -109,9 +116,6 @@ class ParsePipelineTest {
         when(parserChain.parse(any())).thenReturn(new ParseResult(
                 "Detected title", List.of(document), Map.of("score", 1)));
         when(documentRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(documentRepository.findByVersionIdOrderByOrderNoAsc(version.getId())).thenReturn(List.of());
-        when(chunkRepository.findByVersionId(version.getId())).thenReturn(List.of());
-
         pipeline.process(version.getId());
     }
 

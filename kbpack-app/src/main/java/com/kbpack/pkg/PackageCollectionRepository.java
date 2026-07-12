@@ -12,6 +12,10 @@ public interface PackageCollectionRepository extends JpaRepository<PackageCollec
 
     List<PackageCollection> findAllByIdPackageIdIn(Collection<UUID> packageIds);
 
+    List<PackageCollection> findAllByIdCollectionId(UUID collectionId);
+
+    List<PackageCollection> findAllByIdCollectionIdIn(Collection<UUID> collectionIds);
+
     boolean existsByIdPackageIdAndIdCollectionId(UUID packageId, UUID collectionId);
 
     void deleteByIdPackageIdAndIdCollectionId(UUID packageId, UUID collectionId);

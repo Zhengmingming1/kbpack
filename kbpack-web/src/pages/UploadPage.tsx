@@ -28,6 +28,7 @@ import { uploadPackage, type UploadMetadata, type UploadResult } from '../api/pa
 import { listTags } from '../api/tags';
 import { getVersion } from '../api/versions';
 import { StatusTag } from '../components/package/StatusTag';
+import { PACKAGE_SOURCE_OPTIONS } from '../constants/packageOptions';
 import { formatBytes } from '../utils/format';
 
 const { Dragger } = Upload;
@@ -167,7 +168,7 @@ export function UploadPage() {
             />
           </Form.Item>
           <Form.Item name="source_type" label="来源类型">
-            <Select options={[{ value: 'manual', label: '手工上传' }, { value: 'ai_generated', label: 'AI 生成' }, { value: 'imported', label: '外部导入' }]} />
+            <Select options={PACKAGE_SOURCE_OPTIONS} />
           </Form.Item>
           <Form.Item name="entry_file" label="入口文件（可选）">
             <Input placeholder="默认自动识别，如 index.html" />

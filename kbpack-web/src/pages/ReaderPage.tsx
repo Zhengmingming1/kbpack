@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getApiErrorMessage } from '../api/client';
 import { getDocument } from '../api/versions';
 import { ErrorBlock, LoadingBlock } from '../components/common/QueryState';
+import { resolvePackageAssetUrl } from '../utils/packageAssetUrl';
 
 function nodeText(node: ReactNode): string {
   return Children.toArray(node).map((child) => {
@@ -76,8 +77,22 @@ export function ReaderPage() {
             h4: heading(4),
             h5: heading(5),
             h6: heading(6),
-            a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
-            img: ({ src, alt }) => <img src={src} alt={alt || ''} loading="lazy" />,
+            a: ({ href, children }) => (
+              <a
+                href={resolvePackageAssetUrl(href, data.source_path, data.version_id)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {children}
+              </a>
+            ),
+            img: ({ src, alt }) => (
+              <img
+                src={resolvePackageAssetUrl(src, data.source_path, data.version_id)}
+                alt={alt || ''}
+                loading="lazy"
+              />
+            ),
           }}
         >
           {data.content || ''}

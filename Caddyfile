@@ -1,42 +1,42 @@
 {$APP_HOST:kb.nas.local} {
-    tls {$CADDY_TLS:internal}
-    encode zstd gzip
+	tls {$CADDY_TLS:internal}
+	encode zstd gzip
 
-    @backend path /api/* /health /health/*
-    handle @backend {
-        reverse_proxy app:18080
-    }
+	@backend path /api/* /health /health/*
+	handle @backend {
+		reverse_proxy app:18080
+	}
 
-    handle {
-        reverse_proxy web:18080
-    }
+	handle {
+		reverse_proxy web:18080
+	}
 
-    header {
-        -Server
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        Permissions-Policy "camera=(), geolocation=(), microphone=()"
-    }
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+	}
 }
 
 {$PREVIEW_HOST:kb-preview.nas.local} {
-    tls {$CADDY_TLS:internal}
-    encode zstd gzip
+	tls {$CADDY_TLS:internal}
+	encode zstd gzip
 
-    @preview path /p/*
-    handle @preview {
-        reverse_proxy app:18080
-    }
+	@preview path /p/*
+	handle @preview {
+		reverse_proxy app:18080
+	}
 
-    handle {
-        respond "Not Found" 404
-    }
+	handle {
+		respond "Not Found" 404
+	}
 
-    header {
-        -Server
-        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; frame-ancestors https://{$APP_HOST:kb.nas.local};"
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "no-referrer"
-    }
+	header {
+		-Server
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; frame-ancestors https://{$APP_HOST:kb.nas.local};"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
 }

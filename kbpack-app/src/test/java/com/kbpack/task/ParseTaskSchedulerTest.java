@@ -1,6 +1,6 @@
 package com.kbpack.task;
 
-import com.kbpack.common.config.KbpackProperties;
+import com.kbpack.admin.RuntimeSettingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,14 +35,14 @@ class ParseTaskSchedulerTest {
     private ThreadPoolExecutor threadPoolExecutor;
     @Mock
     private BlockingQueue<Runnable> queue;
+    @Mock
+    private RuntimeSettingService runtimeSettings;
 
     private ParseTaskScheduler scheduler;
 
     @BeforeEach
     void setUp() {
-        KbpackProperties properties = new KbpackProperties();
-        properties.getTask().setThreadPoolSize(1);
-        scheduler = new ParseTaskScheduler(stateService, worker, executor, properties);
+        scheduler = new ParseTaskScheduler(stateService, worker, executor, runtimeSettings);
     }
 
     @Test
@@ -55,6 +55,7 @@ class ParseTaskSchedulerTest {
     @Test
     void recoversInterruptedTasksBeforePollingAndDispatchingWork() {
         UUID taskId = UUID.randomUUID();
+        when(runtimeSettings.taskThreadPoolSize()).thenReturn(1);
         when(executor.getMaxPoolSize()).thenReturn(1);
         when(executor.getActiveCount()).thenReturn(0);
         when(executor.getThreadPoolExecutor()).thenReturn(threadPoolExecutor);

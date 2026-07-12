@@ -2,6 +2,7 @@ package com.kbpack.preview;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kbpack.common.config.KbpackProperties;
+import com.kbpack.admin.RuntimeSettingService;
 import com.kbpack.common.error.ApiException;
 import com.kbpack.common.error.ErrorCode;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,8 @@ import java.time.ZoneOffset;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class PreviewTicketServiceTest {
 
@@ -69,16 +72,34 @@ class PreviewTicketServiceTest {
         assertInvalid(() -> service.validateTicket(ticket, PACKAGE_ID, "ver_other"));
     }
 
+    @Test
+    void usesRuntimeTicketTtl() {
+        RuntimeSettingService runtimeSettings = mock(RuntimeSettingService.class);
+        when(runtimeSettings.previewTicketTtlSeconds()).thenReturn(7L);
+        KbpackProperties properties = properties();
+        String ticket = new PreviewTicketService(properties, new ObjectMapper(),
+                Clock.fixed(NOW, ZoneOffset.UTC), runtimeSettings).issueTicket(PACKAGE_ID, VERSION_ID);
+        PreviewTicketService later = new PreviewTicketService(properties, new ObjectMapper(),
+                Clock.fixed(NOW.plusSeconds(13), ZoneOffset.UTC), runtimeSettings);
+
+        assertInvalid(() -> later.validateTicket(ticket, PACKAGE_ID, VERSION_ID));
+    }
+
     private static PreviewTicketService serviceAt(Instant instant) {
-        KbpackProperties properties = new KbpackProperties();
-        properties.getPreview().setTicketSecret("unit-test-preview-secret-with-32-bytes");
-        properties.getPreview().setTicketTtlSeconds(60);
-        properties.getPreview().setSessionTtlSeconds(1_800);
+        KbpackProperties properties = properties();
         return new PreviewTicketService(
                 properties,
                 new ObjectMapper(),
                 Clock.fixed(instant, ZoneOffset.UTC)
         );
+    }
+
+    private static KbpackProperties properties() {
+        KbpackProperties properties = new KbpackProperties();
+        properties.getPreview().setTicketSecret("unit-test-preview-secret-with-32-bytes");
+        properties.getPreview().setTicketTtlSeconds(60);
+        properties.getPreview().setSessionTtlSeconds(1_800);
+        return properties;
     }
 
     private static void assertInvalid(Executable executable) {

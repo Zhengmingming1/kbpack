@@ -246,6 +246,7 @@ public class KbpackProperties {
             private String host = "http://localhost:7700";
             private String apiKey = "change-me";
             private String indexUid = "kb_chunks";
+            private long taskTimeoutSeconds = 300;
 
             public String getHost() {
                 return host;
@@ -269,6 +270,14 @@ public class KbpackProperties {
 
             public void setIndexUid(String indexUid) {
                 this.indexUid = indexUid;
+            }
+
+            public long getTaskTimeoutSeconds() {
+                return taskTimeoutSeconds;
+            }
+
+            public void setTaskTimeoutSeconds(long taskTimeoutSeconds) {
+                this.taskTimeoutSeconds = taskTimeoutSeconds;
             }
         }
     }

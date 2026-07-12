@@ -1,4 +1,8 @@
-FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
+# syntax=docker.m.daocloud.io/docker/dockerfile:1.7
+
+ARG MAVEN_IMAGE=maven:3.9.9-eclipse-temurin-21-alpine
+ARG JRE_IMAGE=eclipse-temurin:21.0.5_11-jre-alpine
+FROM --platform=$BUILDPLATFORM ${MAVEN_IMAGE} AS build
 
 WORKDIR /workspace
 
@@ -8,7 +12,7 @@ RUN mvn -B -ntp dependency:go-offline
 COPY src ./src
 RUN mvn -B -ntp package -DskipTests
 
-FROM eclipse-temurin:21.0.5_11-jre-alpine
+FROM ${JRE_IMAGE}
 
 RUN apk add --no-cache curl \
     && addgroup -S -g 10001 kbpack \

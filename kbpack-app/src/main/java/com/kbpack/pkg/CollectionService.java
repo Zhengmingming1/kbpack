@@ -3,11 +3,13 @@ package com.kbpack.pkg;
 import com.kbpack.admin.OperationLogService;
 import com.kbpack.common.error.ApiException;
 import com.kbpack.common.error.ErrorCode;
+import com.kbpack.search.SearchIndexUpdateCoordinator;
 import com.kbpack.user.AppUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -29,15 +31,21 @@ public class CollectionService {
     private final CollectionRepository collectionRepository;
     private final PackageAccessService accessService;
     private final OperationLogService operationLogService;
+    private final PackageCollectionRepository packageCollectionRepository;
+    private final SearchIndexUpdateCoordinator searchIndexUpdates;
 
     public CollectionService(
             CollectionRepository collectionRepository,
             PackageAccessService accessService,
-            OperationLogService operationLogService
+            OperationLogService operationLogService,
+            PackageCollectionRepository packageCollectionRepository,
+            SearchIndexUpdateCoordinator searchIndexUpdates
     ) {
         this.collectionRepository = collectionRepository;
         this.accessService = accessService;
         this.operationLogService = operationLogService;
+        this.packageCollectionRepository = packageCollectionRepository;
+        this.searchIndexUpdates = searchIndexUpdates;
     }
 
     @Transactional(readOnly = true)
@@ -107,11 +115,31 @@ public class CollectionService {
         accessService.requireContentWriter(actor);
         CollectionEntity collection = collectionRepository.findById(collectionId)
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "集合不存在"));
+        Set<UUID> subtree = collectionSubtree(collectionId);
+        List<UUID> affectedPackages = packageCollectionRepository.findAllByIdCollectionIdIn(subtree).stream()
+                .map(link -> link.getId().getPackageId()).toList();
         collectionRepository.delete(collection);
         operationLogService.record(
                 actor.getId(), "collection.delete", "collection", collectionId,
                 Map.of("name", collection.getName()), ip
         );
+        searchIndexUpdates.refreshPackagesAfterCommit(affectedPackages);
+    }
+
+    private Set<UUID> collectionSubtree(UUID rootId) {
+        Set<UUID> subtree = new LinkedHashSet<>();
+        subtree.add(rootId);
+        List<CollectionEntity> collections = collectionRepository.findAll();
+        boolean changed;
+        do {
+            changed = false;
+            for (CollectionEntity candidate : collections) {
+                if (candidate.getParentId() != null && subtree.contains(candidate.getParentId())) {
+                    changed |= subtree.add(candidate.getId());
+                }
+            }
+        } while (changed);
+        return subtree;
     }
 
     private void validateParentChange(UUID collectionId, UUID parentId) {

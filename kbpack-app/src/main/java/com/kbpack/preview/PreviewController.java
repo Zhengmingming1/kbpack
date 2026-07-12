@@ -115,7 +115,7 @@ public class PreviewController {
                     .secure(request.isSecure())
                     .sameSite("Lax")
                     .path("/p/" + packageId + "/v/" + versionId + "/")
-                    .maxAge(Duration.ofMinutes(30))
+                    .maxAge(Duration.ofSeconds(ticketService.sessionTtlSeconds()))
                     .build();
             headers.add(HttpHeaders.SET_COOKIE, responseCookie.toString());
         }

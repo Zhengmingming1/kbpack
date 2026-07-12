@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -73,7 +74,7 @@ public class SearchIndexService {
         this.versionRepository = versionRepository;
     }
 
-    public void indexVersion(
+    public synchronized void indexVersion(
             KnowledgePackage pkg,
             PackageVersion version,
             List<ExtractedDocument> documents,
@@ -82,14 +83,16 @@ public class SearchIndexService {
         Map<UUID, ExtractedDocument> byId = new HashMap<>();
         documents.forEach(document -> byId.put(document.getId(), document));
         deleteByFilter("version_id = " + quoted(IdPrefix.VERSION.format(version.getId())));
-        if (!chunks.isEmpty()) send("/indexes/" + uid() + "/documents?primaryKey=id", documents(pkg, version, byId, chunks));
+        if (!chunks.isEmpty()) {
+            mutate("/indexes/" + uid() + "/documents?primaryKey=id", documents(pkg, version, byId, chunks));
+        }
     }
 
-    public void deleteVersion(UUID versionId) {
+    public synchronized void deleteVersion(UUID versionId) {
         deleteByFilter("version_id = " + quoted(IdPrefix.VERSION.format(versionId)));
     }
 
-    public void reindexAll() {
+    public synchronized void reindexAll() {
         List<Map<String, Object>> payload = new ArrayList<>();
         Map<UUID, ExtractedDocument> documents = new HashMap<>();
         documentRepository.findAll().forEach(document -> documents.put(document.getId(), document));
@@ -106,7 +109,31 @@ public class SearchIndexService {
                     ? document.getSourcePath() : activeVersion.getEntryFile();
             payload.add(document(pkg, entryFile, document, chunk));
         }
-        if (!payload.isEmpty()) send("/indexes/" + uid() + "/documents?primaryKey=id", payload);
+        awaitTask(request("DELETE", "/indexes/" + uid() + "/documents", null));
+        if (!payload.isEmpty()) mutate("/indexes/" + uid() + "/documents?primaryKey=id", payload);
+    }
+
+    public synchronized void reindexPackage(UUID packageId) {
+        KnowledgePackage pkg = packageRepository.findActiveById(packageId).orElse(null);
+        if (pkg == null) {
+            deleteByFilter("package_id = " + quoted(IdPrefix.PACKAGE.format(packageId)));
+            return;
+        }
+
+        Map<UUID, ExtractedDocument> documents = new HashMap<>();
+        documentRepository.findByPackageId(packageId).forEach(document -> documents.put(document.getId(), document));
+        Map<UUID, PackageVersion> versions = new HashMap<>();
+        versionRepository.findActiveByPackageId(packageId).forEach(version -> versions.put(version.getId(), version));
+        List<Map<String, Object>> payload = new ArrayList<>();
+        for (SearchChunk chunk : chunkRepository.findByPackageId(packageId)) {
+            ExtractedDocument document = documents.get(chunk.getDocumentId());
+            PackageVersion version = versions.get(chunk.getVersionId());
+            if (document == null || version == null) continue;
+            String entryFile = version.getEntryFile() == null ? document.getSourcePath() : version.getEntryFile();
+            payload.add(document(pkg, entryFile, document, chunk));
+        }
+        deleteByFilter("package_id = " + quoted(IdPrefix.PACKAGE.format(packageId)));
+        if (!payload.isEmpty()) mutate("/indexes/" + uid() + "/documents?primaryKey=id", payload);
     }
 
     public SearchPage search(String query, int page, int pageSize, String filter) {
@@ -208,22 +235,57 @@ public class SearchIndexService {
     }
 
     private void deleteByFilter(String filter) {
-        try {
-            send("/indexes/" + uid() + "/documents/delete", Map.of("filter", filter));
-        } catch (ApiException ignored) {
-            // Index creation is eventually consistent during first startup; upsert below still succeeds once ready.
-        }
+        mutate("/indexes/" + uid() + "/documents/delete", Map.of("filter", filter));
     }
 
     private Map<String, Object> send(String path, Object body) {
+        return request("POST", path, body);
+    }
+
+    private void mutate(String path, Object body) {
+        awaitTask(request("POST", path, body));
+    }
+
+    private void awaitTask(Map<String, Object> submitted) {
+        long taskUid = number(submitted.get("taskUid"), -1);
+        if (taskUid < 0) return;
+        long timeoutSeconds = Math.min(3_600, Math.max(30,
+                properties.getSearch().getMeilisearch().getTaskTimeoutSeconds()));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        while (System.nanoTime() < deadline) {
+            Map<String, Object> task = request("GET", "/tasks/" + taskUid, null);
+            String status = String.valueOf(task.getOrDefault("status", ""));
+            if ("succeeded".equals(status)) return;
+            if ("failed".equals(status) || "canceled".equals(status)) {
+                Object error = task.get("error");
+                throw new ApiException(ErrorCode.SEARCH_UNAVAILABLE,
+                        "Search index task " + taskUid + " " + status + (error == null ? "" : ": " + error));
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new ApiException(ErrorCode.SEARCH_UNAVAILABLE, "Interrupted while waiting for search index task");
+            }
+        }
+        throw new ApiException(ErrorCode.SEARCH_UNAVAILABLE, "Timed out waiting for search index task " + taskUid);
+    }
+
+    private Map<String, Object> request(String method, String path, Object body) {
         try {
             String host = properties.getSearch().getMeilisearch().getHost().replaceAll("/+$", "");
-            HttpRequest request = HttpRequest.newBuilder(URI.create(host + path))
+            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(host + path))
                     .timeout(Duration.ofSeconds(10))
                     .header("Authorization", "Bearer " + properties.getSearch().getMeilisearch().getApiKey())
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                    .build();
+                    .header("Content-Type", "application/json");
+            if ("GET".equals(method)) {
+                builder.GET();
+            } else if ("DELETE".equals(method) && body == null) {
+                builder.DELETE();
+            } else {
+                builder.method(method, HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
+            }
+            HttpRequest request = builder.build();
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new ApiException(ErrorCode.SEARCH_UNAVAILABLE, "搜索服务返回 " + response.statusCode());

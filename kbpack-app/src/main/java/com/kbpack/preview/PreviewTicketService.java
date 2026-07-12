@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kbpack.common.config.KbpackProperties;
 import com.kbpack.common.error.ApiException;
 import com.kbpack.common.error.ErrorCode;
+import com.kbpack.admin.RuntimeSettingService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -22,26 +23,41 @@ public class PreviewTicketService {
     private final KbpackProperties properties;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final RuntimeSettingService runtimeSettings;
     private final Map<String, Long> usedNonces = new ConcurrentHashMap<>();
 
     @Autowired
-    public PreviewTicketService(KbpackProperties properties, ObjectMapper objectMapper) {
-        this(properties, objectMapper, Clock.systemUTC());
+    public PreviewTicketService(
+            KbpackProperties properties,
+            ObjectMapper objectMapper,
+            RuntimeSettingService runtimeSettings
+    ) {
+        this(properties, objectMapper, Clock.systemUTC(), runtimeSettings);
     }
 
     PreviewTicketService(KbpackProperties properties, ObjectMapper objectMapper, Clock clock) {
+        this(properties, objectMapper, clock, null);
+    }
+
+    PreviewTicketService(
+            KbpackProperties properties,
+            ObjectMapper objectMapper,
+            Clock clock,
+            RuntimeSettingService runtimeSettings
+    ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.runtimeSettings = runtimeSettings;
     }
 
     public String issueTicket(String packageId, String versionId) {
-        long expiresAt = clock.instant().getEpochSecond() + properties.getPreview().getTicketTtlSeconds();
+        long expiresAt = clock.instant().getEpochSecond() + ticketTtlSeconds();
         return sign(new Credential(packageId, versionId, expiresAt, UUID.randomUUID().toString()));
     }
 
     public String issueSession(String packageId, String versionId) {
-        long expiresAt = clock.instant().getEpochSecond() + properties.getPreview().getSessionTtlSeconds();
+        long expiresAt = clock.instant().getEpochSecond() + sessionTtlSeconds();
         return sign(new Credential(packageId, versionId, expiresAt, null));
     }
 
@@ -94,6 +110,18 @@ public class PreviewTicketService {
         mac.init(new SecretKeySpec(properties.getPreview().getTicketSecret().getBytes(StandardCharsets.UTF_8),
                 "HmacSHA256"));
         return mac.doFinal(value.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    long ticketTtlSeconds() {
+        return runtimeSettings == null
+                ? properties.getPreview().getTicketTtlSeconds()
+                : runtimeSettings.previewTicketTtlSeconds();
+    }
+
+    long sessionTtlSeconds() {
+        return runtimeSettings == null
+                ? properties.getPreview().getSessionTtlSeconds()
+                : runtimeSettings.previewSessionTtlSeconds();
     }
 
     private static <T> T invalid() {

@@ -16,6 +16,7 @@ import com.kbpack.user.AppUser;
 import com.kbpack.user.AuthService;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.ContentDisposition;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -28,8 +29,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -40,6 +44,9 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1")
 public class ContentController {
+    private static final List<String> SAFE_INLINE_IMAGE_TYPES = List.of(
+            "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"
+    );
     private final PackageVersionRepository versionRepository;
     private final KnowledgePackageRepository packageRepository;
     private final PackageAssetRepository assetRepository;
@@ -116,6 +123,61 @@ public class ContentController {
         return new ResponseEntity<>(new InputStreamResource(stream), headers, HttpStatus.OK);
     }
 
+    @GetMapping("/versions/{versionId}/assets/{*assetPath}")
+    public ResponseEntity<StreamingResponseBody> asset(
+            @PathVariable String versionId,
+            @PathVariable String assetPath,
+            Authentication authentication
+    ) {
+        PackageVersion version = requireVersion(versionId, currentUser(authentication));
+        String rawPath = assetPath == null ? "" : assetPath.replaceFirst("^/", "");
+        final String path;
+        try {
+            path = com.kbpack.pkg.UploadService.normalizeEntryPath(rawPath, 512);
+        } catch (ApiException error) {
+            throw new ApiException(ErrorCode.NOT_FOUND);
+        }
+        if (path.isBlank()) throw new ApiException(ErrorCode.NOT_FOUND);
+
+        ExtractedDocument linkedDocument = documentRepository
+                .findByVersionIdAndSourcePath(version.getId(), path).orElse(null);
+        if (linkedDocument != null) {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setLocation(URI.create("/documents/" + IdPrefix.DOCUMENT.format(linkedDocument.getId())));
+            headers.setCacheControl(CacheControl.noStore());
+            return new ResponseEntity<>(null, headers, HttpStatus.FOUND);
+        }
+
+        PackageAsset asset = assetRepository.findByVersionIdAndPath(version.getId(), path)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+        String packageId = IdPrefix.PACKAGE.format(version.getPackageId());
+        String externalVersionId = IdPrefix.VERSION.format(version.getId());
+        var input = storage.open(storage.packagesBucket(),
+                packageId + "/" + externalVersionId + "/files/" + path);
+        StreamingResponseBody body = output -> {
+            try (input) {
+                input.transferTo(output);
+            }
+        };
+
+        String mimeType = asset.getMimeType() == null
+                ? "" : asset.getMimeType().split(";", 2)[0].trim().toLowerCase(java.util.Locale.ROOT);
+        boolean safeInlineImage = SAFE_INLINE_IMAGE_TYPES.contains(mimeType);
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.CONTENT_TYPE, safeInlineImage ? mimeType : MediaType.APPLICATION_OCTET_STREAM_VALUE);
+        headers.setContentLength(asset.getSize());
+        headers.setCacheControl(CacheControl.maxAge(Duration.ofMinutes(10)).cachePrivate());
+        headers.set("X-Content-Type-Options", "nosniff");
+        headers.set("Referrer-Policy", "no-referrer");
+        headers.set("Content-Security-Policy", "default-src 'none'; sandbox");
+        if (!safeInlineImage) {
+            String filename = path.substring(path.lastIndexOf('/') + 1);
+            headers.setContentDisposition(ContentDisposition.attachment()
+                    .filename(filename, StandardCharsets.UTF_8).build());
+        }
+        return new ResponseEntity<>(body, headers, HttpStatus.OK);
+    }
+
     @GetMapping("/versions/{versionId}/documents")
     public List<Map<String, Object>> documents(@PathVariable String versionId, Authentication authentication) {
         PackageVersion version = requireVersion(versionId, currentUser(authentication));
@@ -145,6 +207,7 @@ public class ContentController {
         result.put("version_id", IdPrefix.VERSION.format(document.getVersionId()));
         result.put("title", document.getTitle());
         result.put("doc_type", document.getDocType().name());
+        result.put("source_path", document.getSourcePath());
         result.put("content", document.getContent());
         result.put("heading_tree", document.getHeadingTree() == null ? List.of() : document.getHeadingTree());
         result.put("prev_document_id", index > 0 ? IdPrefix.DOCUMENT.format(siblings.get(index - 1).getId()) : null);

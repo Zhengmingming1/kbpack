@@ -1,6 +1,8 @@
 package com.kbpack.pkg;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -18,6 +20,13 @@ public interface PackageVersionRepository extends JpaRepository<PackageVersion, 
 
     @Query("select v from PackageVersion v where v.id = :id and v.packageId = :packageId and v.deletedAt is null")
     Optional<PackageVersion> findActiveByIdAndPackageId(
+            @Param("id") UUID id,
+            @Param("packageId") UUID packageId
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select v from PackageVersion v where v.id = :id and v.packageId = :packageId and v.deletedAt is null")
+    Optional<PackageVersion> findActiveByIdAndPackageIdForUpdate(
             @Param("id") UUID id,
             @Param("packageId") UUID packageId
     );

@@ -11,7 +11,7 @@ import com.kbpack.pkg.PackageAsset;
 import com.kbpack.pkg.PackageAssetRepository;
 import com.kbpack.pkg.PackageVersion;
 import com.kbpack.pkg.PackageVersionRepository;
-import com.kbpack.search.SearchIndexService;
+import com.kbpack.search.SearchIndexUpdateCoordinator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,7 +29,7 @@ public class ParsePipeline {
     private final ObjectStorageService storage;
     private final ParserChain parserChain;
     private final ChunkSplitter splitter;
-    private final SearchIndexService searchIndexService;
+    private final SearchIndexUpdateCoordinator searchIndexUpdates;
     private final KbpackProperties properties;
 
     public ParsePipeline(
@@ -41,7 +41,7 @@ public class ParsePipeline {
             ObjectStorageService storage,
             ParserChain parserChain,
             ChunkSplitter splitter,
-            SearchIndexService searchIndexService,
+            SearchIndexUpdateCoordinator searchIndexUpdates,
             KbpackProperties properties
     ) {
         this.versionRepository = versionRepository;
@@ -52,16 +52,18 @@ public class ParsePipeline {
         this.storage = storage;
         this.parserChain = parserChain;
         this.splitter = splitter;
-        this.searchIndexService = searchIndexService;
+        this.searchIndexUpdates = searchIndexUpdates;
         this.properties = properties;
     }
 
     @Transactional
     public void process(UUID versionId) {
-        PackageVersion version = versionRepository.findActiveById(versionId)
+        PackageVersion reference = versionRepository.findActiveById(versionId)
                 .orElseThrow(() -> new ApiException(ErrorCode.VERSION_NOT_FOUND));
-        KnowledgePackage pkg = packageRepository.findActiveById(version.getPackageId())
+        KnowledgePackage pkg = packageRepository.findActiveByIdForUpdate(reference.getPackageId())
                 .orElseThrow(() -> new ApiException(ErrorCode.PACKAGE_NOT_FOUND));
+        PackageVersion version = versionRepository.findActiveByIdAndPackageIdForUpdate(versionId, pkg.getId())
+                .orElseThrow(() -> new ApiException(ErrorCode.VERSION_NOT_FOUND));
         version.setParseStatus(PackageVersion.ParseStatus.processing);
         version.setParseError(null);
         versionRepository.save(version);
@@ -145,9 +147,7 @@ public class ParsePipeline {
         packageRepository.flush();
         versionRepository.flush();
 
-        searchIndexService.indexVersion(pkg, version,
-                documentRepository.findByVersionIdOrderByOrderNoAsc(versionId),
-                chunkRepository.findByVersionId(versionId));
+        searchIndexUpdates.refreshPackageAfterCommit(pkg.getId());
     }
 
     private boolean isParseCandidate(PackageAsset asset) {

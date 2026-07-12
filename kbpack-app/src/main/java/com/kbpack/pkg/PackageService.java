@@ -4,7 +4,7 @@ import com.kbpack.admin.OperationLogService;
 import com.kbpack.common.error.ApiException;
 import com.kbpack.common.error.ErrorCode;
 import com.kbpack.user.AppUser;
-import com.kbpack.search.SearchIndexService;
+import com.kbpack.search.SearchIndexUpdateCoordinator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,7 +46,7 @@ public class PackageService {
     private final FavoriteRepository favoriteRepository;
     private final PackageAccessService accessService;
     private final OperationLogService operationLogService;
-    private final SearchIndexService searchIndexService;
+    private final SearchIndexUpdateCoordinator searchIndexUpdates;
 
     public PackageService(
             KnowledgePackageRepository packageRepository,
@@ -58,7 +58,7 @@ public class PackageService {
             FavoriteRepository favoriteRepository,
             PackageAccessService accessService,
             OperationLogService operationLogService,
-            SearchIndexService searchIndexService
+            SearchIndexUpdateCoordinator searchIndexUpdates
     ) {
         this.packageRepository = packageRepository;
         this.versionRepository = versionRepository;
@@ -69,7 +69,7 @@ public class PackageService {
         this.favoriteRepository = favoriteRepository;
         this.accessService = accessService;
         this.operationLogService = operationLogService;
-        this.searchIndexService = searchIndexService;
+        this.searchIndexUpdates = searchIndexUpdates;
     }
 
     @Transactional
@@ -137,6 +137,9 @@ public class PackageService {
         operationLogService.record(
                 actor.getId(), "package.update", "knowledge_package", pkg.getId(), Map.of(), ip
         );
+        if (command.titlePresent() || command.statusPresent() || command.visibilityPresent()) {
+            searchIndexUpdates.refreshPackageAfterCommit(packageId);
+        }
         return pkg;
     }
 
@@ -148,8 +151,8 @@ public class PackageService {
         pkg.setDeletedAt(deletedAt);
         versionRepository.findActiveByPackageId(id).forEach(version -> {
             version.setDeletedAt(deletedAt);
-            removeFromIndex(version.getId());
         });
+        searchIndexUpdates.refreshPackageAfterCommit(id);
         return packageRepository.save(pkg);
     }
 
@@ -168,6 +171,7 @@ public class PackageService {
                 .orElseThrow(() -> new ApiException(ErrorCode.PACKAGE_NOT_FOUND));
         validateStatusTransition(pkg.getStatus(), KnowledgePackage.Status.archived);
         pkg.setStatus(KnowledgePackage.Status.archived);
+        searchIndexUpdates.refreshPackageAfterCommit(id);
         return packageRepository.save(pkg);
     }
 
@@ -234,6 +238,7 @@ public class PackageService {
                 actor.getId(), "package.tags.add", "knowledge_package", packageId,
                 Map.of("tag_names", normalizedNames), ip
         );
+        searchIndexUpdates.refreshPackageAfterCommit(packageId);
         return linked;
     }
 
@@ -248,6 +253,7 @@ public class PackageService {
                 actor.getId(), "package.tags.remove", "knowledge_package", packageId,
                 Map.of("tag_id", tagId.toString()), ip
         );
+        searchIndexUpdates.refreshPackageAfterCommit(packageId);
     }
 
     @Transactional
@@ -269,6 +275,7 @@ public class PackageService {
                 actor.getId(), "package.collections.add", "knowledge_package", packageId,
                 Map.of("collection_id", collectionId.toString()), ip
         );
+        searchIndexUpdates.refreshPackageAfterCommit(packageId);
         return List.of(collection);
     }
 
@@ -283,6 +290,7 @@ public class PackageService {
                 actor.getId(), "package.collections.remove", "knowledge_package", packageId,
                 Map.of("collection_id", collectionId.toString()), ip
         );
+        searchIndexUpdates.refreshPackageAfterCommit(packageId);
     }
 
     @Transactional(readOnly = true)
@@ -305,8 +313,10 @@ public class PackageService {
             AppUser actor,
             String ip
     ) {
-        KnowledgePackage pkg = accessService.requireWritable(packageId, actor);
-        versionRepository.findActiveByIdAndPackageId(versionId, packageId)
+        accessService.requireWritable(packageId, actor);
+        KnowledgePackage pkg = packageRepository.findActiveByIdForUpdate(packageId)
+                .orElseThrow(() -> new ApiException(ErrorCode.PACKAGE_NOT_FOUND));
+        versionRepository.findActiveByIdAndPackageIdForUpdate(versionId, packageId)
                 .orElseThrow(() -> new ApiException(ErrorCode.VERSION_NOT_FOUND));
         pkg.setCurrentVersionId(versionId);
         packageRepository.save(pkg);
@@ -324,28 +334,21 @@ public class PackageService {
             AppUser actor,
             String ip
     ) {
-        KnowledgePackage pkg = accessService.requireWritable(packageId, actor);
-        PackageVersion version = versionRepository.findActiveByIdAndPackageId(versionId, packageId)
-                .orElseThrow(() -> new ApiException(ErrorCode.VERSION_NOT_FOUND));
+        accessService.requireWritable(packageId, actor);
+        KnowledgePackage pkg = packageRepository.findActiveByIdForUpdate(packageId)
+                .orElseThrow(() -> new ApiException(ErrorCode.PACKAGE_NOT_FOUND));
         if (versionId.equals(pkg.getCurrentVersionId())) {
             throw new ApiException(ErrorCode.CURRENT_VERSION_DELETE_FORBIDDEN);
         }
+        PackageVersion version = versionRepository.findActiveByIdAndPackageIdForUpdate(versionId, packageId)
+                .orElseThrow(() -> new ApiException(ErrorCode.VERSION_NOT_FOUND));
         version.setDeletedAt(Instant.now());
         versionRepository.save(version);
-        removeFromIndex(versionId);
+        searchIndexUpdates.deleteVersionAfterCommit(versionId);
         operationLogService.record(
                 actor.getId(), "version.delete", "package_version", versionId,
                 Map.of("package_id", packageId.toString()), ip
         );
-    }
-
-    private void removeFromIndex(UUID versionId) {
-        if (searchIndexService == null) return;
-        try {
-            searchIndexService.deleteVersion(versionId);
-        } catch (RuntimeException ignored) {
-            // PostgreSQL is authoritative; reindex and retention cleanup repair transient search failures.
-        }
     }
 
     public String uniqueSlug(String title) {

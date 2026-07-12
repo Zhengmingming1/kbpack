@@ -10,16 +10,16 @@ import { StatusTag } from '../components/package/StatusTag';
 import { useSession } from '../hooks/useSession';
 
 const fields = [
-  { key: 'upload.max_package_size_mb', label: '单个上传包上限', unit: 'MB', min: 1 },
-  { key: 'upload.max_unpacked_size_mb', label: '解压后总大小上限', unit: 'MB', min: 1 },
-  { key: 'upload.max_file_count', label: '解压文件数量上限', unit: '个', min: 1 },
-  { key: 'upload.max_single_file_size_mb', label: '单文件大小上限', unit: 'MB', min: 1 },
-  { key: 'upload.max_path_length', label: '路径长度上限', unit: '字符', min: 64 },
-  { key: 'cleanup.soft_delete_retention_days', label: '软删除保留时间', unit: '天', min: 1 },
-  { key: 'task.poll_interval_seconds', label: '任务轮询间隔', unit: '秒', min: 1 },
-  { key: 'task.thread_pool_size', label: '解析线程数', unit: '个', min: 1 },
-  { key: 'preview.ticket_ttl_seconds', label: '预览票据有效期', unit: '秒', min: 10 },
-  { key: 'preview.session_ttl_seconds', label: '预览会话有效期', unit: '秒', min: 60 },
+  { key: 'upload.max_package_size_mb', label: '单个上传包上限', unit: 'MB', min: 1, max: 5120 },
+  { key: 'upload.max_unpacked_size_mb', label: '解压后总大小上限', unit: 'MB', min: 1, max: 51200 },
+  { key: 'upload.max_file_count', label: '解压文件数量上限', unit: '个', min: 1, max: 100000 },
+  { key: 'upload.max_single_file_size_mb', label: '单文件大小上限', unit: 'MB', min: 1, max: 5120 },
+  { key: 'upload.max_path_length', label: '路径长度上限', unit: '字符', min: 64, max: 512 },
+  { key: 'cleanup.soft_delete_retention_days', label: '软删除保留时间', unit: '天', min: 1, max: 3650 },
+  { key: 'task.poll_interval_seconds', label: '任务轮询间隔', unit: '秒', min: 1, max: 86400 },
+  { key: 'task.thread_pool_size', label: '解析线程数', unit: '个', min: 1, max: 64 },
+  { key: 'preview.ticket_ttl_seconds', label: '预览票据有效期', unit: '秒', min: 10, max: 3600 },
+  { key: 'preview.session_ttl_seconds', label: '预览会话有效期', unit: '秒', min: 60, max: 86400 },
 ] as const;
 
 export function SettingsPage() {
@@ -39,10 +39,7 @@ export function SettingsPage() {
   }, [form, settings.data]);
 
   const saveMutation = useMutation({
-    mutationFn: (values: SystemSettings) => {
-      const payload = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, String(value)]));
-      return updateSettings(payload);
-    },
+    mutationFn: (values: SystemSettings) => updateSettings(values),
     onSuccess: (data) => {
       message.success('系统设置已保存');
       queryClient.setQueryData(['settings'], data);
@@ -99,7 +96,7 @@ export function SettingsPage() {
             <div className="settings-grid">
               {fields.map((field) => (
                 <Form.Item key={field.key} name={field.key} label={field.label} rules={[{ required: true, message: '请输入有效数值' }]}>
-                  <InputNumber min={field.min} max={1_000_000} suffix={field.unit} precision={0} style={{ width: '100%' }} />
+                  <InputNumber min={field.min} max={field.max} suffix={field.unit} precision={0} style={{ width: '100%' }} />
                 </Form.Item>
               ))}
             </div>

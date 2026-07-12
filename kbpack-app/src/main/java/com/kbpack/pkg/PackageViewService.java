@@ -70,6 +70,7 @@ public class PackageViewService {
             current.put("id", IdPrefix.VERSION.format(currentVersion.getId()));
             current.put("version_no", currentVersion.getVersionNo());
             current.put("parse_status", currentVersion.getParseStatus().name());
+            current.put("entry_file", currentVersion.getEntryFile());
             body.put("current_version", current);
             body.put("file_count", currentVersion.getFileCount() == null ? 0 : currentVersion.getFileCount());
             body.put("unpacked_size", currentVersion.getUnpackedSize() == null ? 0L : currentVersion.getUnpackedSize());
@@ -143,6 +144,7 @@ public class PackageViewService {
         body.put("content_hash", formatHash(version.getContentHash()));
         body.put("parse_status", version.getParseStatus().name());
         body.put("parse_error", version.getParseError());
+        body.put("entry_file", version.getEntryFile());
         body.put("unpacked_size", version.getUnpackedSize());
         body.put("file_count", version.getFileCount());
         body.put("is_current", version.getId().equals(currentVersionId));

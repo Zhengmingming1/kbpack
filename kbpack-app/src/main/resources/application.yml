@@ -18,8 +18,10 @@ spring:
     locations: classpath:db/migration
   servlet:
     multipart:
-      max-file-size: 500MB
-      max-request-size: 500MB
+      # Transport ceiling. The lower database-backed upload.max_package_size_mb remains authoritative.
+      # max-request-size intentionally leaves room for multipart framing and form fields.
+      max-file-size: ${MULTIPART_MAX_FILE_SIZE:5GB}
+      max-request-size: ${MULTIPART_MAX_REQUEST_SIZE:6GB}
   jackson:
     serialization:
       write-dates-as-timestamps: false
@@ -82,6 +84,7 @@ kbpack:
       host: ${MEILI_HOST:http://localhost:7700}
       api-key: ${MEILI_MASTER_KEY:dev-meili-master-key-change-me}
       index-uid: kb_chunks
+      task-timeout-seconds: ${MEILI_TASK_TIMEOUT_SECONDS:300}
   init:
     admin-username: ${INIT_ADMIN_USERNAME:admin}
     admin-password: ${INIT_ADMIN_PASSWORD:admin123456}

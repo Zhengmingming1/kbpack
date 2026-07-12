@@ -4,7 +4,7 @@ import com.kbpack.admin.OperationLogService;
 import com.kbpack.common.error.ApiException;
 import com.kbpack.common.error.ErrorCode;
 import com.kbpack.user.AppUser;
-import com.kbpack.search.SearchIndexService;
+import com.kbpack.search.SearchIndexUpdateCoordinator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -32,7 +32,7 @@ class PackageServiceTest {
     @Mock private FavoriteRepository favoriteRepository;
     @Mock private PackageAccessService accessService;
     @Mock private OperationLogService operationLogService;
-    @Mock private SearchIndexService searchIndexService;
+    @Mock private SearchIndexUpdateCoordinator searchIndexUpdates;
 
     @InjectMocks
     private PackageService packageService;
@@ -53,14 +53,15 @@ class PackageServiceTest {
         version.setPackageId(packageId);
 
         when(accessService.requireWritable(packageId, actor)).thenReturn(pkg);
-        when(versionRepository.findActiveByIdAndPackageId(versionId, packageId))
-                .thenReturn(Optional.of(version));
+        when(packageRepository.findActiveByIdForUpdate(packageId)).thenReturn(Optional.of(pkg));
 
         assertThatThrownBy(() -> packageService.deleteVersion(packageId, versionId, actor, "127.0.0.1"))
                 .isInstanceOfSatisfying(ApiException.class,
                         ex -> assertThat(ex.getErrorCode())
                                 .isEqualTo(ErrorCode.CURRENT_VERSION_DELETE_FORBIDDEN));
         verify(versionRepository, never()).save(version);
+        verify(packageRepository).findActiveByIdForUpdate(packageId);
+        verify(versionRepository, never()).findActiveByIdAndPackageIdForUpdate(versionId, packageId);
     }
 
     @Test
@@ -99,5 +100,6 @@ class PackageServiceTest {
 
         assertThat(pkg.getStatus()).isEqualTo(KnowledgePackage.Status.deprecated);
         verify(packageRepository).save(pkg);
+        verify(searchIndexUpdates).refreshPackageAfterCommit(packageId);
     }
 }

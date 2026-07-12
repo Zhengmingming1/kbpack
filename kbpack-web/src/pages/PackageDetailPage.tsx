@@ -31,7 +31,7 @@ import {
   Typography,
   type TableColumnsType,
 } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   archivePackage,
@@ -46,6 +46,7 @@ import { getApiErrorMessage } from '../api/client';
 import {
   deleteVersion,
   getFiles,
+  getVersion,
   listDocuments,
   listVersions,
   reparseVersion,
@@ -55,8 +56,21 @@ import {
 } from '../api/versions';
 import { EmptyBlock, ErrorBlock, LoadingBlock } from '../components/common/QueryState';
 import { StatusTag } from '../components/package/StatusTag';
+import {
+  PACKAGE_STATUS_OPTIONS,
+  PACKAGE_VISIBILITY_OPTIONS,
+  packageSourceLabel,
+  packageVisibilityLabel,
+} from '../constants/packageOptions';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { formatBytes, formatDate } from '../utils/format';
+
+const REPARSE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+function isParsing(status?: string | null) {
+  const normalized = status?.toLowerCase();
+  return normalized === 'pending' || normalized === 'processing';
+}
 
 function fileTreeData(nodes: FileNode[]): Array<{ key: string; title: string; isLeaf: boolean; children?: ReturnType<typeof fileTreeData> }> {
   return nodes.map((node) => ({
@@ -90,6 +104,8 @@ export function PackageDetailPage() {
   const [reparseTarget, setReparseTarget] = useState<PackageVersion>();
   const [reparseEntry, setReparseEntry] = useState('');
   const [reparseEntryTouched, setReparseEntryTouched] = useState(false);
+  const [reparseWatch, setReparseWatch] = useState<{ versionId: string; startedAt: number }>();
+  const skippedReparseVersionIds = useRef(new Set<string>());
   const [form] = Form.useForm();
   const isCompact = useMediaQuery('(max-width: 1023px)');
 
@@ -102,6 +118,19 @@ export function PackageDetailPage() {
     queryKey: ['versions', packageId],
     queryFn: () => listVersions(packageId),
     enabled: Boolean(packageId),
+  });
+  const reparseStatusQuery = useQuery({
+    queryKey: ['reparse-status', packageId, reparseWatch?.versionId, reparseWatch?.startedAt],
+    queryFn: () => getVersion(packageId, reparseWatch!.versionId),
+    enabled: Boolean(packageId && reparseWatch?.versionId),
+    retry: 3,
+    retryDelay: 1200,
+    refetchInterval: (query) => (
+      isParsing(query.state.data?.parse_status) && reparseWatch
+        && Date.now() - reparseWatch.startedAt < REPARSE_POLL_TIMEOUT_MS
+        ? 2000
+        : false
+    ),
   });
   const currentVersion =
     versionsQuery.data?.find((version) => version.is_current) ||
@@ -140,6 +169,60 @@ export function PackageDetailPage() {
     if (reparseEntryTouched || reparseEntry || !reparseFilesQuery.data) return;
     setReparseEntry(preferredEntryFile(reparseFilesQuery.data));
   }, [reparseEntry, reparseEntryTouched, reparseFilesQuery.data]);
+
+  useEffect(() => {
+    if (reparseWatch) return;
+    const pendingVersion = versionsQuery.data?.find((version) => (
+      isParsing(version.parse_status) && !skippedReparseVersionIds.current.has(version.id)
+    ));
+    if (!pendingVersion) return;
+    setReparseWatch((current) => current || {
+      versionId: pendingVersion.id,
+      startedAt: Date.now(),
+    });
+  }, [reparseWatch, versionsQuery.data]);
+
+  useEffect(() => {
+    if (!reparseWatch) return undefined;
+    const remaining = REPARSE_POLL_TIMEOUT_MS - (Date.now() - reparseWatch.startedAt);
+    const timeout = window.setTimeout(() => {
+      skippedReparseVersionIds.current.add(reparseWatch.versionId);
+      setReparseWatch(undefined);
+      message.warning('重新解析仍在后台执行，请稍后手动刷新查看结果');
+    }, Math.max(remaining, 0));
+    return () => window.clearTimeout(timeout);
+  }, [message, reparseWatch]);
+
+  useEffect(() => {
+    if (!reparseWatch) return;
+    if (reparseStatusQuery.isError) {
+      skippedReparseVersionIds.current.add(reparseWatch.versionId);
+      setReparseWatch(undefined);
+      message.warning('无法继续自动刷新解析进度，请稍后手动刷新');
+      return;
+    }
+
+    const status = reparseStatusQuery.data?.parse_status?.toLowerCase();
+    if (!status || isParsing(status)) return;
+
+    const versionId = reparseWatch.versionId;
+    queryClient.setQueryData<PackageVersion[]>(['versions', packageId], (versions) =>
+      versions?.map((version) => (
+        version.id === versionId ? { ...version, parse_status: status } : version
+      )),
+    );
+    setReparseWatch(undefined);
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['package', packageId] }),
+      queryClient.invalidateQueries({ queryKey: ['versions', packageId] }),
+      queryClient.invalidateQueries({ queryKey: ['files', versionId] }),
+      queryClient.invalidateQueries({ queryKey: ['documents', versionId] }),
+      queryClient.invalidateQueries({ queryKey: ['document'] }),
+      queryClient.invalidateQueries({ queryKey: ['packages'] }),
+    ]);
+    if (status === 'success') message.success('重新解析已完成');
+    else message.warning('重新解析已结束，但解析失败');
+  }, [message, packageId, queryClient, reparseStatusQuery.data?.parse_status, reparseStatusQuery.isError, reparseWatch]);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['package', packageId] });
@@ -189,7 +272,7 @@ export function PackageDetailPage() {
       if (action === 'delete') return deleteVersion(packageId, version.id);
       return reparseVersion(version.id, entryFile);
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (data, variables) => {
       message.success(
         variables.action === 'current'
           ? '当前版本已切换'
@@ -198,6 +281,16 @@ export function PackageDetailPage() {
             : '已提交重新解析',
       );
       if (variables.action === 'reparse') {
+        const parseStatus = data && typeof data === 'object' && 'parse_status' in data
+          ? String(data.parse_status)
+          : 'pending';
+        queryClient.setQueryData<PackageVersion[]>(['versions', packageId], (versions) =>
+          versions?.map((version) => (
+            version.id === variables.version.id ? { ...version, parse_status: parseStatus } : version
+          )),
+        );
+        skippedReparseVersionIds.current.delete(variables.version.id);
+        setReparseWatch({ versionId: variables.version.id, startedAt: Date.now() });
         setReparseTarget(undefined);
         setReparseEntry('');
         setReparseEntryTouched(false);
@@ -318,7 +411,12 @@ export function PackageDetailPage() {
               { key: 'preview', icon: <EyeOutlined />, label: '预览' },
               { key: 'download', icon: <DownloadOutlined />, label: '下载' },
               { key: 'current', label: '设为当前版本', disabled: version.is_current || version.id === pkg.current_version?.id },
-              { key: 'reparse', icon: <ReloadOutlined />, label: '重新解析' },
+              {
+                key: 'reparse',
+                icon: <ReloadOutlined />,
+                label: '重新解析',
+                disabled: Boolean(reparseWatch) || isParsing(version.parse_status),
+              },
               { type: 'divider' },
               { key: 'delete', icon: <DeleteOutlined />, label: '删除版本', danger: true, disabled: version.is_current || version.id === pkg.current_version?.id },
             ],
@@ -485,8 +583,8 @@ export function PackageDetailPage() {
             <section className="surface surface-pad">
               <div className="section-heading"><h3>元数据</h3></div>
               <Descriptions column={1} size="small" colon={false}>
-                <Descriptions.Item label="来源">{pkg.source_name || pkg.source_type || '手工上传'}</Descriptions.Item>
-                <Descriptions.Item label="可见性">{pkg.visibility}</Descriptions.Item>
+                <Descriptions.Item label="来源">{pkg.source_name || packageSourceLabel(pkg.source_type) || '手工上传'}</Descriptions.Item>
+                <Descriptions.Item label="可见性">{packageVisibilityLabel(pkg.visibility)}</Descriptions.Item>
                 <Descriptions.Item label="创建时间">{formatDate(pkg.created_at)}</Descriptions.Item>
                 <Descriptions.Item label="知识包 ID"><Typography.Text copyable>{pkg.id}</Typography.Text></Descriptions.Item>
               </Descriptions>
@@ -523,10 +621,10 @@ export function PackageDetailPage() {
             <Input.TextArea rows={4} maxLength={2000} showCount />
           </Form.Item>
           <Form.Item name="status" label="状态">
-            <Select options={[{ value: 'active', label: '可用' }, { value: 'draft', label: '草稿' }, { value: 'deprecated', label: '已过期' }]} />
+            <Select options={PACKAGE_STATUS_OPTIONS} />
           </Form.Item>
           <Form.Item name="visibility" label="可见性">
-            <Select options={[{ value: 'private', label: '私有' }, { value: 'internal', label: '内部可见' }]} />
+            <Select options={PACKAGE_VISIBILITY_OPTIONS} />
           </Form.Item>
         </Form>
       </Modal>
