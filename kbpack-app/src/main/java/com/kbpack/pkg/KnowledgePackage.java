@@ -121,4 +121,5 @@ public class KnowledgePackage {
     public Instant getDeletedAt() { return deletedAt; }
     public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
     public long getLockVersion() { return lockVersion; }
+    void touch() { updatedAt = Instant.now(); }
 }

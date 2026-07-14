@@ -72,6 +72,14 @@ export async function updatePackage(
   return data;
 }
 
+export async function replacePackageTags(packageId: string, tagNames: string[]) {
+  const { data } = await apiClient.put<Array<{ id: string; name: string }>>(
+    `/api/v1/packages/${packageId}/tags`,
+    { tag_names: tagNames },
+  );
+  return data;
+}
+
 export async function deletePackage(packageId: string) {
   await apiClient.delete(`/api/v1/packages/${packageId}`);
 }

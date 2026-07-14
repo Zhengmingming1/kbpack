@@ -10,6 +10,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -32,7 +35,16 @@ import java.util.UUID;
 @RequestMapping("/api/v1/packages")
 public class PackageController {
 
-    public record TagRequest(@NotEmpty List<@NotBlank String> tag_names) {
+    public record TagRequest(
+            @NotEmpty @Size(max = PackageService.MAX_TAGS_PER_REQUEST)
+            List<@NotBlank String> tag_names
+    ) {
+    }
+
+    public record ReplaceTagsRequest(
+            @NotNull @Size(max = PackageService.MAX_TAGS_PER_REQUEST)
+            List<@NotBlank String> tag_names
+    ) {
     }
 
     public record CollectionRequest(@NotBlank String collection_id) {
@@ -211,6 +223,18 @@ public class PackageController {
                 parsePackageId(packageId), parseTagId(tagId), user, request.getRemoteAddr()
         );
         return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/{packageId}/tags")
+    public List<Map<String, Object>> replaceTags(
+            @PathVariable String packageId,
+            @Valid @RequestBody ReplaceTagsRequest body,
+            HttpServletRequest request
+    ) {
+        AppUser user = accessService.currentUser();
+        UUID id = parsePackageId(packageId);
+        packageService.replaceTags(id, body.tag_names(), user, request.getRemoteAddr());
+        return viewService.tagViews(id);
     }
 
     @PostMapping("/{packageId}/collections")

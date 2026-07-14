@@ -8,12 +8,17 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -51,6 +56,12 @@ public class ExtractedDocument {
     @Column(nullable = false, columnDefinition = "text")
     private String content;
 
+    @Column(name = "content_hash", nullable = false, length = 64)
+    private String contentHash;
+
+    @Column(name = "content_length", nullable = false)
+    private long contentLength;
+
     @Column(name = "raw_content", columnDefinition = "text")
     private String rawContent;
 
@@ -65,7 +76,31 @@ public class ExtractedDocument {
     private Instant createdAt;
 
     @PrePersist
-    void onCreate() { createdAt = Instant.now(); }
+    void onCreate() {
+        createdAt = Instant.now();
+        updateContentMetadata();
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updateContentMetadata();
+    }
+
+    private void updateContentMetadata() {
+        if (content == null) {
+            contentHash = null;
+            contentLength = 0;
+            return;
+        }
+        contentLength = content.codePointCount(0, content.length());
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(content.getBytes(StandardCharsets.UTF_8));
+            contentHash = HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available", ex);
+        }
+    }
 
     public UUID getId() { return id; }
     public UUID getVersionId() { return versionId; }
@@ -82,6 +117,8 @@ public class ExtractedDocument {
     public void setOrderNo(int orderNo) { this.orderNo = orderNo; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+    public String getContentHash() { return contentHash; }
+    public long getContentLength() { return contentLength; }
     public String getRawContent() { return rawContent; }
     public void setRawContent(String rawContent) { this.rawContent = rawContent; }
     public List<Map<String, Object>> getHeadingTree() { return headingTree; }

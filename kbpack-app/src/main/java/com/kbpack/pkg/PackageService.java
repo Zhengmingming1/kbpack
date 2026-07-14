@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.text.Normalizer;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -24,6 +25,7 @@ public class PackageService {
 
     private static final Pattern NON_SLUG = Pattern.compile("[^a-z0-9]+");
     private static final Set<String> VISIBILITIES = Set.of("private", "team", "public");
+    static final int MAX_TAGS_PER_REQUEST = 50;
 
     public record PatchCommand(
             boolean titlePresent,
@@ -212,28 +214,31 @@ public class PackageService {
             AppUser actor,
             String ip
     ) {
-        accessService.requireWritable(packageId, actor);
+        KnowledgePackage pkg = lockWritablePackage(packageId, actor);
         if (tagNames == null || tagNames.isEmpty()) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "tag_names 不能为空");
         }
+        enforceTagCount(tagNames);
         LinkedHashSet<String> normalizedNames = new LinkedHashSet<>();
         for (String rawName : tagNames) {
             String name = normalizeTagName(rawName);
             normalizedNames.add(name);
         }
 
-        List<Tag> linked = new ArrayList<>();
-        for (String name : normalizedNames) {
-            Tag tag = tagRepository.findByName(name).orElseGet(() -> {
-                Tag created = new Tag();
-                created.setName(name);
-                return tagRepository.save(created);
-            });
-            if (!packageTagRepository.existsByIdPackageIdAndIdTagId(packageId, tag.getId())) {
-                packageTagRepository.save(new PackageTag(new PackageTagId(packageId, tag.getId())));
-            }
-            linked.add(tag);
+        List<Tag> linked = resolveTags(normalizedNames);
+        LinkedHashSet<UUID> existingIds = new LinkedHashSet<>();
+        packageTagRepository.findAllByIdPackageId(packageId)
+                .forEach(link -> existingIds.add(link.getId().getTagId()));
+        List<PackageTag> addedLinks = linked.stream()
+                .map(Tag::getId)
+                .filter(tagId -> !existingIds.contains(tagId))
+                .map(tagId -> new PackageTag(new PackageTagId(packageId, tagId)))
+                .toList();
+        if (!addedLinks.isEmpty()) {
+            packageTagRepository.saveAll(addedLinks);
         }
+        pkg.touch();
+        packageRepository.save(pkg);
         operationLogService.record(
                 actor.getId(), "package.tags.add", "knowledge_package", packageId,
                 Map.of("tag_names", normalizedNames), ip
@@ -244,16 +249,100 @@ public class PackageService {
 
     @Transactional
     public void removeTag(UUID packageId, UUID tagId, AppUser actor, String ip) {
-        accessService.requireWritable(packageId, actor);
+        KnowledgePackage pkg = lockWritablePackage(packageId, actor);
         if (!tagRepository.existsById(tagId)) {
             throw new ApiException(ErrorCode.NOT_FOUND, "标签不存在");
         }
         packageTagRepository.deleteByIdPackageIdAndIdTagId(packageId, tagId);
+        pkg.touch();
+        packageRepository.save(pkg);
         operationLogService.record(
                 actor.getId(), "package.tags.remove", "knowledge_package", packageId,
                 Map.of("tag_id", tagId.toString()), ip
         );
         searchIndexUpdates.refreshPackageAfterCommit(packageId);
+    }
+
+    @Transactional
+    public void replaceTags(
+            UUID packageId,
+            List<String> tagNames,
+            AppUser actor,
+            String ip
+    ) {
+        KnowledgePackage pkg = lockWritablePackage(packageId, actor);
+        if (tagNames == null) {
+            throw new ApiException(ErrorCode.BAD_REQUEST);
+        }
+        enforceTagCount(tagNames);
+
+        LinkedHashSet<String> normalizedNames = new LinkedHashSet<>();
+        for (String rawName : tagNames) {
+            normalizedNames.add(normalizeTagName(rawName));
+        }
+
+        List<Tag> requestedTags = resolveTags(normalizedNames);
+
+        LinkedHashSet<UUID> requestedIds = new LinkedHashSet<>();
+        requestedTags.forEach(tag -> requestedIds.add(tag.getId()));
+        List<PackageTag> existingLinks = packageTagRepository.findAllByIdPackageId(packageId);
+        LinkedHashSet<UUID> existingIds = new LinkedHashSet<>();
+        existingLinks.forEach(link -> existingIds.add(link.getId().getTagId()));
+
+        List<PackageTag> removedLinks = existingLinks.stream()
+                .filter(link -> !requestedIds.contains(link.getId().getTagId()))
+                .toList();
+        if (!removedLinks.isEmpty()) {
+            packageTagRepository.deleteAll(removedLinks);
+        }
+
+        List<PackageTag> addedLinks = requestedIds.stream()
+                .filter(tagId -> !existingIds.contains(tagId))
+                .map(tagId -> new PackageTag(new PackageTagId(packageId, tagId)))
+                .toList();
+        if (!addedLinks.isEmpty()) {
+            packageTagRepository.saveAll(addedLinks);
+        }
+
+        pkg.touch();
+        packageRepository.save(pkg);
+        operationLogService.record(
+                actor.getId(), "package.tags.replace", "knowledge_package", packageId,
+                Map.of("tag_names", normalizedNames), ip
+        );
+        searchIndexUpdates.refreshPackageAfterCommit(packageId);
+    }
+
+    private KnowledgePackage lockWritablePackage(UUID packageId, AppUser actor) {
+        accessService.requireWritable(packageId, actor);
+        return packageRepository.findActiveByIdForUpdate(packageId)
+                .orElseThrow(() -> new ApiException(ErrorCode.PACKAGE_NOT_FOUND));
+    }
+
+    private void enforceTagCount(List<String> tagNames) {
+        if (tagNames.size() > MAX_TAGS_PER_REQUEST) {
+            throw new ApiException(
+                    ErrorCode.BAD_REQUEST,
+                    "单次最多设置 " + MAX_TAGS_PER_REQUEST + " 个标签"
+            );
+        }
+    }
+
+    private List<Tag> resolveTags(LinkedHashSet<String> normalizedNames) {
+        if (normalizedNames.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Tag> tagsByName = new HashMap<>();
+        tagRepository.findAllByNameIn(normalizedNames)
+                .forEach(tag -> tagsByName.put(tag.getName(), tag));
+        for (String name : normalizedNames) {
+            if (!tagsByName.containsKey(name)) {
+                Tag created = new Tag();
+                created.setName(name);
+                tagsByName.put(name, tagRepository.save(created));
+            }
+        }
+        return normalizedNames.stream().map(tagsByName::get).toList();
     }
 
     @Transactional

@@ -2,6 +2,7 @@ import {
   ArrowLeftOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
+  DiffOutlined,
   DownloadOutlined,
   EditOutlined,
   EyeOutlined,
@@ -11,6 +12,7 @@ import {
   ReloadOutlined,
   StarFilled,
   StarOutlined,
+  TagsOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -27,6 +29,7 @@ import {
   Space,
   Table,
   Tabs,
+  Tooltip,
   Tree,
   Typography,
   type TableColumnsType,
@@ -38,6 +41,7 @@ import {
   deletePackage,
   getPackage,
   packageDownloadUrl,
+  replacePackageTags,
   setFavorite,
   updatePackage,
   type PackageDetail,
@@ -54,8 +58,10 @@ import {
   type FileNode,
   type PackageVersion,
 } from '../api/versions';
+import { listTags } from '../api/tags';
 import { EmptyBlock, ErrorBlock, LoadingBlock } from '../components/common/QueryState';
 import { StatusTag } from '../components/package/StatusTag';
+import { VersionDiffModal } from '../components/package/VersionDiffModal';
 import {
   PACKAGE_STATUS_OPTIONS,
   PACKAGE_VISIBILITY_OPTIONS,
@@ -101,6 +107,12 @@ export function PackageDetailPage() {
   const queryClient = useQueryClient();
   const { message, modal } = App.useApp();
   const [editOpen, setEditOpen] = useState(false);
+  const [tagOpen, setTagOpen] = useState(false);
+  const [tagNames, setTagNames] = useState<string[]>([]);
+  const [diffSelection, setDiffSelection] = useState<{
+    baseVersionId: string;
+    targetVersionId: string;
+  }>();
   const [reparseTarget, setReparseTarget] = useState<PackageVersion>();
   const [reparseEntry, setReparseEntry] = useState('');
   const [reparseEntryTouched, setReparseEntryTouched] = useState(false);
@@ -118,6 +130,11 @@ export function PackageDetailPage() {
     queryKey: ['versions', packageId],
     queryFn: () => listVersions(packageId),
     enabled: Boolean(packageId),
+  });
+  const tagsQuery = useQuery({
+    queryKey: ['tags'],
+    queryFn: listTags,
+    enabled: tagOpen,
   });
   const reparseStatusQuery = useQuery({
     queryKey: ['reparse-status', packageId, reparseWatch?.versionId, reparseWatch?.startedAt],
@@ -258,6 +275,23 @@ export function PackageDetailPage() {
     onError: (error) => message.error(getApiErrorMessage(error)),
   });
 
+  const tagMutation = useMutation({
+    mutationFn: (names: string[]) => replacePackageTags(packageId, names),
+    onSuccess: (tags) => {
+      queryClient.setQueryData<PackageDetail>(['package', packageId], (current) => (
+        current ? { ...current, tags: tags.map((tag) => tag.name) } : current
+      ));
+      setTagOpen(false);
+      message.success('知识包标签已更新');
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['package', packageId] }),
+        queryClient.invalidateQueries({ queryKey: ['packages'] }),
+        queryClient.invalidateQueries({ queryKey: ['tags'] }),
+      ]);
+    },
+    onError: (error) => message.error(getApiErrorMessage(error)),
+  });
+
   const versionMutation = useMutation({
     mutationFn: async ({
       action,
@@ -316,6 +350,22 @@ export function PackageDetailPage() {
     setReparseEntryTouched(false);
   };
 
+  const openDiff = (targetVersion?: PackageVersion) => {
+    const versions = versionsQuery.data || [];
+    const target = targetVersion || versions[0];
+    if (!target || versions.length < 2) {
+      message.info('至少需要两个版本才能进行对比');
+      return;
+    }
+    const targetIndex = versions.findIndex((version) => version.id === target.id);
+    const base = versions[targetIndex + 1] || versions.find((version) => version.id !== target.id);
+    if (!base) return;
+    setDiffSelection({
+      baseVersionId: base.id,
+      targetVersionId: target.id,
+    });
+  };
+
   if (packageQuery.isPending) return <LoadingBlock rows={10} />;
   if (packageQuery.isError) {
     return (
@@ -336,6 +386,10 @@ export function PackageDetailPage() {
       visibility: pkg.visibility,
     });
     setEditOpen(true);
+  };
+  const openTagEdit = () => {
+    setTagNames(pkg.tags || []);
+    setTagOpen(true);
   };
 
   const confirmDelete = () => {
@@ -410,6 +464,12 @@ export function PackageDetailPage() {
             items: [
               { key: 'preview', icon: <EyeOutlined />, label: '预览' },
               { key: 'download', icon: <DownloadOutlined />, label: '下载' },
+              {
+                key: 'diff',
+                icon: <DiffOutlined />,
+                label: '与其他版本对比',
+                disabled: (versionsQuery.data?.length || 0) < 2,
+              },
               { key: 'current', label: '设为当前版本', disabled: version.is_current || version.id === pkg.current_version?.id },
               {
                 key: 'reparse',
@@ -423,6 +483,7 @@ export function PackageDetailPage() {
             onClick: ({ key }) => {
               if (key === 'preview') navigate(`/packages/${packageId}/preview/${version.id}`);
               else if (key === 'download') window.location.assign(packageDownloadUrl(version.id));
+              else if (key === 'diff') openDiff(version);
               else if (key === 'current') versionMutation.mutate({ action: 'current', version });
               else if (key === 'reparse') openReparse(version);
               else if (key === 'delete') {
@@ -447,14 +508,26 @@ export function PackageDetailPage() {
   const versionsTable = versionsQuery.isError ? (
     <ErrorBlock description={getApiErrorMessage(versionsQuery.error)} onRetry={() => void versionsQuery.refetch()} />
   ) : (
-    <Table
-      rowKey="id"
-      columns={versionColumns}
-      dataSource={versionsQuery.data || []}
-      loading={versionsQuery.isPending}
-      pagination={false}
-      scroll={{ x: 720 }}
-    />
+    <div className="versions-panel">
+      <div className="versions-toolbar">
+        <Typography.Text type="secondary">共 {versionsQuery.data?.length || 0} 个版本</Typography.Text>
+        <Button
+          icon={<DiffOutlined />}
+          disabled={(versionsQuery.data?.length || 0) < 2}
+          onClick={() => openDiff()}
+        >
+          对比版本
+        </Button>
+      </div>
+      <Table
+        rowKey="id"
+        columns={versionColumns}
+        dataSource={versionsQuery.data || []}
+        loading={versionsQuery.isPending}
+        pagination={false}
+        scroll={{ x: 720 }}
+      />
+    </div>
   );
 
   const overview = (
@@ -523,6 +596,16 @@ export function PackageDetailPage() {
           <div className="detail-title-meta">
             <StatusTag status={pkg.status} />
             {(pkg.tags || []).map((tag) => <span className="text-tag" key={tag}>{tag}</span>)}
+            <Tooltip title="修改标签">
+              <Button
+                className="detail-tag-edit"
+                type="text"
+                size="small"
+                icon={<TagsOutlined />}
+                aria-label="修改标签"
+                onClick={openTagEdit}
+              />
+            </Tooltip>
             <Typography.Text type="secondary">更新于 {formatDate(pkg.updated_at)}</Typography.Text>
           </div>
         </div>
@@ -628,6 +711,49 @@ export function PackageDetailPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title="修改知识包标签"
+        open={tagOpen}
+        onCancel={() => setTagOpen(false)}
+        onOk={() => {
+          const normalized = Array.from(new Set(
+            tagNames.map((name) => name.trim()).filter(Boolean),
+          ));
+          tagMutation.mutate(normalized);
+        }}
+        confirmLoading={tagMutation.isPending}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form layout="vertical">
+          <Form.Item label="标签">
+            <Select
+              mode="tags"
+              allowClear
+              value={tagNames}
+              loading={tagsQuery.isPending}
+              options={(tagsQuery.data || []).map((tag) => ({
+                value: tag.name,
+                label: tag.name,
+              }))}
+              placeholder="选择或输入标签"
+              tokenSeparators={[',', '，']}
+              maxTagCount="responsive"
+              onChange={setTagNames}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <VersionDiffModal
+        open={Boolean(diffSelection)}
+        packageId={packageId}
+        versions={versionsQuery.data || []}
+        initialBaseVersionId={diffSelection?.baseVersionId}
+        initialTargetVersionId={diffSelection?.targetVersionId}
+        onClose={() => setDiffSelection(undefined)}
+      />
 
       <Modal
         title={reparseTarget ? `重新解析 v${reparseTarget.version_no}` : '重新解析'}
