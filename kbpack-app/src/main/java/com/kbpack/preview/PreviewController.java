@@ -26,7 +26,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.time.Duration;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/p/{packageId}/v/{versionId}")
@@ -101,14 +104,20 @@ public class PreviewController {
         };
 
         HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.CONTENT_TYPE, asset.getMimeType() == null ? "application/octet-stream" : asset.getMimeType());
+        String contentType = asset.getMimeType();
+        if (contentType == null || "application/octet-stream".equalsIgnoreCase(contentType)) {
+            contentType = UploadService.contentType(path);
+        }
+        headers.set(HttpHeaders.CONTENT_TYPE, contentType);
         headers.setContentLength(asset.getSize());
         headers.setCacheControl(CacheControl.maxAge(Duration.ofMinutes(10)).cachePrivate());
         headers.set("X-Content-Type-Options", "nosniff");
         headers.set("Referrer-Policy", "no-referrer");
         headers.set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
                 + "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; "
-                + "connect-src 'none'; frame-ancestors " + frameAncestor());
+                + "connect-src " + previewContentSources(request, packageId, versionId) + "; "
+                + "worker-src 'self' blob:; media-src 'self' data: blob:; "
+                + "frame-ancestors " + frameAncestor());
         if (cookie != null) {
             ResponseCookie responseCookie = ResponseCookie.from(COOKIE, cookie)
                     .httpOnly(true)
@@ -127,12 +136,46 @@ public class PreviewController {
         catch (IllegalArgumentException e) { throw new ApiException(ErrorCode.NOT_FOUND); }
     }
 
-    private String frameAncestor() {
+    String frameAncestor() {
         try {
-            java.net.URI uri = java.net.URI.create(properties.getAppBaseUrl());
-            return uri.getScheme() + "://" + uri.getAuthority();
+            java.net.URI appUri = java.net.URI.create(properties.getAppBaseUrl());
+            java.net.URI previewUri = java.net.URI.create(properties.getPreviewBaseUrl());
+            String appOrigin = appUri.getScheme() + "://" + appUri.getAuthority();
+            String previewOrigin = previewUri.getScheme() + "://" + previewUri.getAuthority();
+            return appOrigin.equalsIgnoreCase(previewOrigin) ? "'self'" : appOrigin;
         } catch (Exception e) {
             return "'none'";
         }
+    }
+
+    String previewContentSources(HttpServletRequest request, String packageId, String versionId) {
+        Set<String> origins = new LinkedHashSet<>();
+        addOrigin(origins, properties.getPreviewBaseUrl());
+        addOrigin(origins, requestOrigin(request));
+        if (origins.isEmpty()) return "'none'";
+
+        String prefix = "/p/" + packageId + "/v/" + versionId + "/";
+        return origins.stream()
+                .map(origin -> origin + prefix)
+                .collect(Collectors.joining(" "));
+    }
+
+    private static void addOrigin(Set<String> origins, String value) {
+        try {
+            java.net.URI uri = java.net.URI.create(value);
+            if (uri.getScheme() != null && uri.getAuthority() != null) {
+                origins.add(uri.getScheme() + "://" + uri.getAuthority());
+            }
+        } catch (Exception ignored) {
+            // Invalid optional origins are ignored; the request origin remains available.
+        }
+    }
+
+    private static String requestOrigin(HttpServletRequest request) {
+        String scheme = request.getScheme();
+        int port = request.getServerPort();
+        boolean defaultPort = ("http".equalsIgnoreCase(scheme) && port == 80)
+                || ("https".equalsIgnoreCase(scheme) && port == 443);
+        return scheme + "://" + request.getServerName() + (defaultPort ? "" : ":" + port);
     }
 }

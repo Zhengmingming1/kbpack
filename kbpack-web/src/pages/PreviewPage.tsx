@@ -6,7 +6,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Alert, Button, Select, Space, Spin, Typography } from 'antd';
+import { Alert, App, Button, Select, Space, Spin, Typography } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getApiErrorMessage } from '../api/client';
@@ -181,8 +181,10 @@ function readFramePosition(
 export function PreviewPage() {
   const { packageId = '', versionId = '' } = useParams();
   const navigate = useNavigate();
+  const { message } = App.useApp();
   const [loaded, setLoaded] = useState(false);
   const [slow, setSlow] = useState(false);
+  const [openingFullscreen, setOpeningFullscreen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const saveTimerRef = useRef<number>();
   const frameListenerCleanupRef = useRef<() => void>();
@@ -327,6 +329,32 @@ export function PreviewPage() {
     ticket.mutate();
   };
 
+  const openFullscreen = async () => {
+    const previewWindow = window.open('about:blank', '_blank');
+    if (!previewWindow) {
+      message.warning('浏览器拦截了新窗口，请允许本站打开弹窗后重试。');
+      return;
+    }
+    try {
+      previewWindow.opener = null;
+    } catch {
+      // Some browsers expose opener as read-only; the navigation still remains usable.
+    }
+
+    setOpeningFullscreen(true);
+    try {
+      const nextTicket = await createPreviewTicket(packageId, versionId);
+      if (!previewWindow.closed) {
+        previewWindow.location.replace(new URL(nextTicket.preview_url, window.location.href).toString());
+      }
+    } catch (error) {
+      if (!previewWindow.closed) previewWindow.close();
+      message.error(getApiErrorMessage(error, '无法打开全屏预览，请稍后重试。'));
+    } finally {
+      setOpeningFullscreen(false);
+    }
+  };
+
   return (
     <main className="preview-page">
       <header className="preview-toolbar">
@@ -356,8 +384,9 @@ export function PreviewPage() {
             type="text"
             icon={<FullscreenOutlined />}
             aria-label="新窗口打开"
-            disabled={!ticket.data?.preview_url}
-            onClick={() => ticket.data?.preview_url && window.open(ticket.data.preview_url, '_blank', 'noopener,noreferrer')}
+            loading={openingFullscreen}
+            disabled={!ticket.data?.preview_url || openingFullscreen}
+            onClick={() => void openFullscreen()}
           />
           <Button type="text" icon={<DownloadOutlined />} aria-label="下载原始包" href={packageDownloadUrl(versionId)} />
         </Space>

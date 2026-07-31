@@ -74,9 +74,13 @@ public class PreviewTicketController {
             throw new ApiException(ErrorCode.PREVIEW_NOT_READY, "该版本没有 HTML 入口文件");
         }
         String ticket = ticketService.issueTicket(packageId, versionId);
-        String base = properties.getPreviewBaseUrl().replaceAll("/+$", "");
-        String url = base + "/p/" + packageId + "/v/" + versionId + "/" + encodePath(version.getEntryFile())
-                + "?ticket=" + URLEncoder.encode(ticket, StandardCharsets.UTF_8);
+        String url = buildPreviewUrl(
+                properties.getAppBaseUrl(),
+                properties.getPreviewBaseUrl(),
+                packageId,
+                versionId,
+                version.getEntryFile(),
+                ticket);
         operationLogService.record(
                 user.getId(),
                 "preview.ticket.issue",
@@ -100,5 +104,35 @@ public class PreviewTicketController {
         return java.util.Arrays.stream(path.split("/"))
                 .map(segment -> URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20"))
                 .collect(java.util.stream.Collectors.joining("/"));
+    }
+
+    static String buildPreviewUrl(
+            String appBaseUrl,
+            String previewBaseUrl,
+            String packageId,
+            String versionId,
+            String entryFile,
+            String ticket
+    ) {
+        String appBase = normalizeBaseUrl(appBaseUrl);
+        String previewBase = normalizeBaseUrl(previewBaseUrl);
+        String base = sameOrigin(appBase, previewBase) ? "" : previewBase;
+        return base + "/p/" + packageId + "/v/" + versionId + "/" + encodePath(entryFile)
+                + "?ticket=" + URLEncoder.encode(ticket, StandardCharsets.UTF_8);
+    }
+
+    private static String normalizeBaseUrl(String value) {
+        return value == null ? "" : value.strip().replaceAll("/+$", "");
+    }
+
+    private static boolean sameOrigin(String left, String right) {
+        try {
+            java.net.URI leftUri = java.net.URI.create(left);
+            java.net.URI rightUri = java.net.URI.create(right);
+            return leftUri.getScheme().equalsIgnoreCase(rightUri.getScheme())
+                    && leftUri.getAuthority().equalsIgnoreCase(rightUri.getAuthority());
+        } catch (Exception ignored) {
+            return left.equalsIgnoreCase(right);
+        }
     }
 }
