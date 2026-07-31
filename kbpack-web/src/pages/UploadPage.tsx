@@ -20,11 +20,11 @@ import {
   Typography,
   Upload,
 } from 'antd';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { listCollections, type CollectionItem } from '../api/collections';
 import { getApiErrorMessage } from '../api/client';
-import { uploadPackage, type UploadMetadata, type UploadResult } from '../api/packages';
+import { getPackage, uploadPackage, type UploadMetadata, type UploadResult } from '../api/packages';
 import { listTags } from '../api/tags';
 import { getVersion } from '../api/versions';
 import { StatusTag } from '../components/package/StatusTag';
@@ -51,8 +51,48 @@ export function UploadPage() {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<UploadResult>();
   const targetPackageId = params.get('packageId') || undefined;
+  const hydratedTargetPackageId = useRef<string>();
+  const previousTargetPackageId = useRef(targetPackageId);
+  const targetPackage = useQuery({
+    queryKey: ['package', targetPackageId],
+    queryFn: () => getPackage(targetPackageId!),
+    enabled: Boolean(targetPackageId),
+  });
   const tags = useQuery({ queryKey: ['tags'], queryFn: listTags });
   const collections = useQuery({ queryKey: ['collections'], queryFn: listCollections });
+
+  useEffect(() => {
+    if (previousTargetPackageId.current === targetPackageId) return;
+    previousTargetPackageId.current = targetPackageId;
+    hydratedTargetPackageId.current = undefined;
+    form.resetFields();
+  }, [form, targetPackageId]);
+
+  useEffect(() => {
+    if (
+      current !== 1
+      || !targetPackageId
+      || !targetPackage.data
+      || hydratedTargetPackageId.current === targetPackageId
+    ) return;
+
+    const inherited: UploadMetadata = {
+      title: targetPackage.data.title,
+      description: targetPackage.data.description,
+      source_type: targetPackage.data.source_type || 'manual',
+      source_name: targetPackage.data.source_name,
+      tag_names: targetPackage.data.tags,
+      collection_ids: (targetPackage.data.collections || []).map((collection) => collection.id),
+    };
+    const untouched: UploadMetadata = {};
+    (Object.keys(inherited) as Array<keyof UploadMetadata>).forEach((field) => {
+      if (!form.isFieldTouched(field)) {
+        Object.assign(untouched, { [field]: inherited[field] });
+      }
+    });
+    form.setFieldsValue(untouched);
+    hydratedTargetPackageId.current = targetPackageId;
+  }, [current, form, targetPackage.data, targetPackageId]);
 
   const uploadMutation = useMutation({
     mutationFn: (values: UploadMetadata) =>
@@ -60,7 +100,11 @@ export function UploadPage() {
     onSuccess: (data) => {
       setResult(data);
       setCurrent(2);
-      void queryClient.invalidateQueries({ queryKey: ['packages'] });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['packages'] }),
+        queryClient.invalidateQueries({ queryKey: ['package', data.package_id] }),
+        queryClient.invalidateQueries({ queryKey: ['versions', data.package_id] }),
+      ]);
     },
     onError: (error) => message.error(getApiErrorMessage(error, '上传失败，请检查文件和限制配置')),
   });
@@ -122,10 +166,19 @@ export function UploadPage() {
     <div className="upload-step-panel">
       {targetPackageId ? (
         <Alert
-          type="info"
+          type={targetPackage.isError && !targetPackage.data ? 'warning' : 'info'}
           showIcon
           message="上传新版本"
-          description={`文件将作为知识包 ${targetPackageId} 的新版本。`}
+          description={
+            targetPackage.isPending
+              ? '正在读取原有信息…'
+              : targetPackage.isError && !targetPackage.data
+                ? '原有信息读取失败，请重试后再上传。'
+                : `文件将作为“${targetPackage.data?.title}”的新版本，原有信息已自动带入。`
+          }
+          action={targetPackage.isError && !targetPackage.data ? (
+            <Button size="small" onClick={() => void targetPackage.refetch()}>重试</Button>
+          ) : undefined}
         />
       ) : null}
       <Form
@@ -184,7 +237,13 @@ export function UploadPage() {
         ) : null}
         <div className="upload-step-actions">
           <Button disabled={uploadMutation.isPending} onClick={() => setCurrent(0)}>上一步</Button>
-          <Button type="primary" htmlType="submit" loading={uploadMutation.isPending} icon={<CloudUploadOutlined />}>
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={uploadMutation.isPending}
+            disabled={Boolean(targetPackageId && !targetPackage.data)}
+            icon={<CloudUploadOutlined />}
+          >
             开始上传
           </Button>
         </div>
@@ -251,6 +310,7 @@ export function UploadPage() {
           setFile(undefined);
           setResult(undefined);
           setProgress(0);
+          hydratedTargetPackageId.current = undefined;
           form.resetFields();
         }}>继续上传</Button>,
       ].filter(Boolean)}
