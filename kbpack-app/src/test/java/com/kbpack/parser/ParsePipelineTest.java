@@ -100,6 +100,25 @@ class ParsePipelineTest {
     }
 
     @Test
+    void successfulPromotionCandidateBecomesCurrent() {
+        UUID packageId = UUID.randomUUID();
+        UUID previousVersionId = UUID.randomUUID();
+        UUID candidateVersionId = UUID.randomUUID();
+        KnowledgePackage pkg = packageWith(
+                packageId, previousVersionId, KnowledgePackage.Status.active);
+        PackageVersion candidate = versionWith(packageId, candidateVersionId);
+        candidate.setPromoteOnSuccess(true);
+        when(versionRepository.findPromotionCandidates(packageId)).thenReturn(List.of(candidate));
+
+        runPipeline(pkg, candidate);
+
+        assertThat(pkg.getCurrentVersionId()).isEqualTo(candidateVersionId);
+        assertThat(candidate.isPromoteOnSuccess()).isFalse();
+        assertThat(candidate.getParseStatus()).isEqualTo(PackageVersion.ParseStatus.success);
+        verify(searchIndexUpdates).refreshPackageAfterCommit(packageId);
+    }
+
+    @Test
     void ignoresPlatformMetadataWhenReparsingExistingVersion() {
         UUID packageId = UUID.randomUUID();
         UUID versionId = UUID.randomUUID();
@@ -125,7 +144,8 @@ class ParsePipelineTest {
     }
 
     private void runPipeline(KnowledgePackage pkg, PackageVersion version, List<PackageAsset> assets) {
-        when(versionRepository.findActiveById(version.getId())).thenReturn(Optional.of(version));
+        when(versionRepository.findActivePackageIdById(version.getId()))
+                .thenReturn(Optional.of(pkg.getId()));
         when(packageRepository.findActiveByIdForUpdate(pkg.getId())).thenReturn(Optional.of(pkg));
         when(versionRepository.findActiveByIdAndPackageIdForUpdate(version.getId(), pkg.getId()))
                 .thenReturn(Optional.of(version));

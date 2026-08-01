@@ -1,9 +1,12 @@
-import { DownloadOutlined, EyeOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
+import { DownloadOutlined, EyeOutlined, FileTextOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
 import { Button, Space, Tooltip, Typography } from 'antd';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import type { PackageListItem } from '../../api/packages';
 import { packageDownloadUrl } from '../../api/packages';
+import { packageSourceLabel } from '../../constants/packageOptions';
 import { formatBytes, formatRelativeDate } from '../../utils/format';
+import { resolvePackageAssetUrl } from '../../utils/packageAssetUrl';
 import { StatusTag } from './StatusTag';
 
 export function PackageCard({
@@ -17,33 +20,49 @@ export function PackageCard({
 }) {
   const navigate = useNavigate();
   const version = item.current_version;
+  const [coverFailed, setCoverFailed] = useState(false);
+  const coverUrl = resolvePackageAssetUrl(item.cover_url || undefined, undefined, version?.id);
+
+  useEffect(() => setCoverFailed(false), [coverUrl]);
 
   return (
     <article className={`package-card${compact ? ' package-card-compact' : ''}`}>
-      <button className="package-card-main" onClick={() => navigate(`/packages/${item.id}`)}>
-        <div className="package-card-kicker">
-          <span>{version ? `v${version.version_no}` : '尚无版本'}</span>
-          <span>{formatRelativeDate(item.updated_at)}</span>
+      <Link className="package-card-main" to={`/packages/${item.id}`} aria-label={`打开知识包：${item.title}`}>
+        <div className="package-card-cover">
+          {coverUrl && !coverFailed ? (
+            <img src={coverUrl} alt="" loading="lazy" onError={() => setCoverFailed(true)} />
+          ) : (
+            <div className="package-card-cover-fallback" aria-hidden="true">
+              <FileTextOutlined />
+              <span>{packageSourceLabel(item.source_type) || '知识资料'}</span>
+            </div>
+          )}
         </div>
-        <Typography.Title level={3}>{item.title}</Typography.Title>
-        {compact ? null : (
-          <Typography.Paragraph className="package-description" ellipsis={{ rows: 2 }}>
-            {item.description || '暂无描述'}
-          </Typography.Paragraph>
-        )}
-        <div className="package-card-tags">
-          {(item.tags || []).slice(0, 4).map((tag) => (
-            <span key={tag} className="text-tag">
-              {tag}
-            </span>
-          ))}
+        <div className="package-card-body">
+          <div className="package-card-kicker">
+            <span>{version ? `v${version.version_no}` : '尚无版本'}</span>
+            <span>{formatRelativeDate(item.updated_at)}</span>
+          </div>
+          <Typography.Title level={3}>{item.title}</Typography.Title>
+          {compact ? null : (
+            <Typography.Paragraph className="package-description" ellipsis={{ rows: 2 }}>
+              {item.description || '暂无描述'}
+            </Typography.Paragraph>
+          )}
+          <div className="package-card-tags">
+            {(item.tags || []).slice(0, 4).map((tag) => (
+              <span key={tag} className="text-tag">
+                {tag}
+              </span>
+            ))}
+          </div>
+          <div className="package-card-meta">
+            <StatusTag status={version?.parse_status || item.status} />
+            <span>{item.file_count ?? '—'} 文件</span>
+            <span>{formatBytes(item.unpacked_size)}</span>
+          </div>
         </div>
-        <div className="package-card-meta">
-          <StatusTag status={version?.parse_status || item.status} />
-          <span>{item.file_count ?? '—'} 文件</span>
-          <span>{formatBytes(item.unpacked_size)}</span>
-        </div>
-      </button>
+      </Link>
       <div className="package-card-actions">
         <Space size={4}>
           {onFavorite ? (

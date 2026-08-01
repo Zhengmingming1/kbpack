@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppShell } from '../components/layout/AppShell';
-import { AuthGuard } from '../components/auth/AuthGuard';
+import { AdministratorGuard, AuthGuard, ContentWriterGuard } from '../components/auth/AuthGuard';
 import { LoadingBlock } from '../components/common/QueryState';
 
 const LoginPage = lazy(() => import('../pages/LoginPage').then((module) => ({ default: module.LoginPage })));
@@ -15,6 +15,7 @@ const SearchPage = lazy(() => import('../pages/SearchPage').then((module) => ({ 
 const TagManagePage = lazy(() => import('../pages/TagManagePage').then((module) => ({ default: module.TagManagePage })));
 const CollectionManagePage = lazy(() => import('../pages/CollectionManagePage').then((module) => ({ default: module.CollectionManagePage })));
 const SettingsPage = lazy(() => import('../pages/SettingsPage').then((module) => ({ default: module.SettingsPage })));
+const TrashPage = lazy(() => import('../pages/TrashPage').then((module) => ({ default: module.TrashPage })));
 
 function page(element: ReactNode) {
   return <Suspense fallback={<LoadingBlock rows={5} />}>{element}</Suspense>;
@@ -34,12 +35,22 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: page(<HomePage />) },
           { path: 'packages', element: page(<PackageListPage />) },
-          { path: 'packages/upload', element: page(<UploadPage />) },
+          {
+            path: 'packages/upload',
+            element: <ContentWriterGuard>{page(<UploadPage />)}</ContentWriterGuard>,
+          },
           { path: 'packages/:packageId', element: page(<PackageDetailPage />) },
           { path: 'search', element: page(<SearchPage />) },
           { path: 'tags', element: page(<TagManagePage />) },
           { path: 'collections', element: page(<CollectionManagePage />) },
-          { path: 'settings', element: page(<SettingsPage />) },
+          {
+            path: 'trash',
+            element: <ContentWriterGuard>{page(<TrashPage />)}</ContentWriterGuard>,
+          },
+          {
+            path: 'settings',
+            element: <AdministratorGuard>{page(<SettingsPage />)}</AdministratorGuard>,
+          },
         ],
       },
       {

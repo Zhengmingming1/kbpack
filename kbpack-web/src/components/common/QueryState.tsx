@@ -2,7 +2,7 @@ import { Alert, Button, Empty, Skeleton, Space } from 'antd';
 
 export function LoadingBlock({ rows = 4 }: { rows?: number }) {
   return (
-    <div className="state-block" aria-label="正在加载">
+    <div className="state-block" role="status" aria-live="polite" aria-busy="true" aria-label="正在加载">
       <Skeleton active paragraph={{ rows }} title />
     </div>
   );

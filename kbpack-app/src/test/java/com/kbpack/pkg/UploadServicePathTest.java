@@ -103,9 +103,12 @@ class UploadServicePathTest {
         pkg.setId(UUID.randomUUID());
         PackageService packageService = mock(PackageService.class);
         when(packageService.createDraft(anyString(), anyString(), any(), anyString(), any())).thenReturn(pkg);
+        when(packageService.replaceUploadMetadata(
+                any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(pkg);
         PackageVersionRepository versionRepository = mock(PackageVersionRepository.class);
         when(versionRepository.findActiveByPackageId(pkg.getId())).thenReturn(List.of());
-        return new UploadService(limitService, null, packageService, null,
+        return new UploadService(limitService, null, packageService,
                 versionRepository, null, null, null);
     }
 

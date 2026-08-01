@@ -5,7 +5,7 @@ import { Fragment, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { listCollections, type CollectionItem } from '../api/collections';
 import { getApiErrorMessage } from '../api/client';
-import { searchKnowledge } from '../api/search';
+import { searchKnowledge, type SearchResult } from '../api/search';
 import { listTags } from '../api/tags';
 import { EmptyBlock, ErrorBlock, LoadingBlock } from '../components/common/QueryState';
 import { PACKAGE_SOURCE_OPTIONS, PACKAGE_STATUS_OPTIONS } from '../constants/packageOptions';
@@ -28,6 +28,11 @@ function highlightedSnippet(value: string): ReactNode {
   );
 }
 
+function searchResultTarget(item: SearchResult) {
+  const hash = item.anchor ? `#${encodeURIComponent(item.anchor)}` : '';
+  return `/documents/${item.document_id}${hash}`;
+}
+
 export function SearchPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -46,6 +51,7 @@ export function SearchPage() {
       source: params.get('source') || undefined,
       status: params.get('status') || undefined,
       package_id: params.get('package_id') || undefined,
+      version_scope: (params.get('version_scope') || 'current') as 'current' | 'history' | 'all',
       page,
       page_size: 20,
     }),
@@ -69,6 +75,18 @@ export function SearchPage() {
 
   const filterForm = (
     <div className="filter-form">
+      <label>
+        <span>版本范围</span>
+        <Select
+          value={params.get('version_scope') || 'current'}
+          onChange={(value) => updateParam('version_scope', value === 'current' ? undefined : value)}
+          options={[
+            { value: 'current', label: '当前成功版本' },
+            { value: 'history', label: '仅历史成功版本' },
+            { value: 'all', label: '全部成功版本' },
+          ]}
+        />
+      </label>
       <label>
         <span>标签</span>
         <Select
@@ -124,9 +142,9 @@ export function SearchPage() {
     <div className="search-page">
       <div className="page-heading search-heading">
         <div>
-          <span className="eyebrow">Search archive</span>
+          <span className="eyebrow">全库检索</span>
           <Typography.Title level={1}>搜索</Typography.Title>
-          <Typography.Paragraph type="secondary">在知识包标题、章节正文和标签中查找内容。</Typography.Paragraph>
+          <Typography.Paragraph type="secondary">默认检索当前成功版本，也可显式查看历史版本。</Typography.Paragraph>
         </div>
       </div>
 
@@ -196,11 +214,19 @@ export function SearchPage() {
             {results.data?.items.map((item) => (
               <article className="search-result-item" key={`${item.document_id}-${item.anchor || ''}`}>
                 <div className="search-result-kicker">
-                  <Link to={`/packages/${item.package_id}`}>{item.package_title}</Link>
+                  <span>
+                    <Link to={`/packages/${item.package_id}`}>{item.package_title}</Link>
+                    {item.heading && item.heading !== item.document_title ? ` · ${item.document_title}` : ''}
+                    <span className="search-version-label">
+                      {item.is_current === false ? '历史' : '当前'}{item.version_no ? ` v${item.version_no}` : ''}
+                    </span>
+                  </span>
                   <time>{formatRelativeDate(item.updated_at)}</time>
                 </div>
                 <Typography.Title level={2}>
-                  <Link to={`/documents/${item.document_id}`}>{item.document_title}</Link>
+                  <Link to={searchResultTarget(item)}>
+                    {highlightedSnippet(item.heading || item.document_title)}
+                  </Link>
                 </Typography.Title>
                 <p className="search-snippet">{highlightedSnippet(item.snippet)}</p>
                 <div className="search-result-footer">
@@ -209,7 +235,14 @@ export function SearchPage() {
                   </Space>
                   <Space>
                     <Button type="link" size="small" onClick={() => navigate(`/packages/${item.package_id}`)}>详情</Button>
-                    <Button type="primary" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/documents/${item.document_id}`)}>打开章节</Button>
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<EyeOutlined />}
+                      onClick={() => navigate(searchResultTarget(item))}
+                    >
+                      打开匹配位置
+                    </Button>
                   </Space>
                 </div>
               </article>

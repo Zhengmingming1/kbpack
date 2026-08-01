@@ -16,7 +16,7 @@ export interface PackageListItem {
   id: string;
   title: string;
   description?: string;
-  cover_url?: string;
+  cover_url?: string | null;
   status: string;
   visibility: string;
   source_type?: string;
@@ -33,6 +33,10 @@ export interface PackageListItem {
   };
   file_count?: number;
   unpacked_size?: number;
+  can_edit?: boolean;
+  can_delete?: boolean;
+  can_reparse?: boolean;
+  can_manage_versions?: boolean;
 }
 
 export interface PackageDetail extends PackageListItem {
@@ -78,6 +82,32 @@ export async function replacePackageTags(packageId: string, tagNames: string[]) 
     { tag_names: tagNames },
   );
   return data;
+}
+
+export async function addPackageCollection(packageId: string, collectionId: string) {
+  const { data } = await apiClient.post<CollectionRef[]>(`/api/v1/packages/${packageId}/collections`, {
+    collection_id: collectionId,
+  });
+  return data;
+}
+
+export async function removePackageCollection(packageId: string, collectionId: string) {
+  await apiClient.delete(`/api/v1/packages/${packageId}/collections/${collectionId}`);
+}
+
+export async function replacePackageCollections(
+  packageId: string,
+  currentCollectionIds: string[],
+  nextCollectionIds: string[],
+) {
+  const current = new Set(currentCollectionIds);
+  const next = new Set(nextCollectionIds);
+  const removals = currentCollectionIds.filter((id) => !next.has(id));
+  const additions = nextCollectionIds.filter((id) => !current.has(id));
+  await Promise.all([
+    ...removals.map((id) => removePackageCollection(packageId, id)),
+    ...additions.map((id) => addPackageCollection(packageId, id)),
+  ]);
 }
 
 export async function deletePackage(packageId: string) {

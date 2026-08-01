@@ -80,6 +80,11 @@ public class SearchIndexService {
             List<ExtractedDocument> documents,
             List<SearchChunk> chunks
     ) {
+        if (!version.getId().equals(pkg.getCurrentVersionId())
+                || version.getParseStatus() != PackageVersion.ParseStatus.success) {
+            deleteVersion(version.getId());
+            return;
+        }
         Map<UUID, ExtractedDocument> byId = new HashMap<>();
         documents.forEach(document -> byId.put(document.getId(), document));
         deleteByFilter("version_id = " + quoted(IdPrefix.VERSION.format(version.getId())));
@@ -99,15 +104,20 @@ public class SearchIndexService {
         Map<UUID, KnowledgePackage> packages = new HashMap<>();
         packageRepository.findAll().stream().filter(pkg -> pkg.getDeletedAt() == null)
                 .forEach(pkg -> packages.put(pkg.getId(), pkg));
+        Map<UUID, PackageVersion> currentVersions = new HashMap<>();
+        packages.values().forEach(pkg -> {
+            if (pkg.getCurrentVersionId() == null) return;
+            versionRepository.findActiveById(pkg.getCurrentVersionId())
+                    .filter(version -> version.getParseStatus() == PackageVersion.ParseStatus.success)
+                    .ifPresent(version -> currentVersions.put(pkg.getId(), version));
+        });
         for (SearchChunk chunk : chunkRepository.findAll()) {
             KnowledgePackage pkg = packages.get(chunk.getPackageId());
             ExtractedDocument document = documents.get(chunk.getDocumentId());
-            if (pkg == null || document == null) continue;
-            PackageVersion activeVersion = versionRepository.findActiveById(chunk.getVersionId()).orElse(null);
-            if (activeVersion == null) continue;
-            String entryFile = activeVersion.getEntryFile() == null
-                    ? document.getSourcePath() : activeVersion.getEntryFile();
-            payload.add(document(pkg, entryFile, document, chunk));
+            PackageVersion activeVersion = currentVersions.get(chunk.getPackageId());
+            if (pkg == null || document == null || activeVersion == null
+                    || !activeVersion.getId().equals(chunk.getVersionId())) continue;
+            payload.add(document(pkg, activeVersion, document, chunk));
         }
         awaitTask(request("DELETE", "/indexes/" + uid() + "/documents", null));
         if (!payload.isEmpty()) mutate("/indexes/" + uid() + "/documents?primaryKey=id", payload);
@@ -120,17 +130,24 @@ public class SearchIndexService {
             return;
         }
 
+        PackageVersion currentVersion = pkg.getCurrentVersionId() == null
+                ? null
+                : versionRepository.findActiveById(pkg.getCurrentVersionId())
+                .filter(version -> version.getParseStatus() == PackageVersion.ParseStatus.success)
+                .orElse(null);
         Map<UUID, ExtractedDocument> documents = new HashMap<>();
-        documentRepository.findByPackageId(packageId).forEach(document -> documents.put(document.getId(), document));
-        Map<UUID, PackageVersion> versions = new HashMap<>();
-        versionRepository.findActiveByPackageId(packageId).forEach(version -> versions.put(version.getId(), version));
+        if (currentVersion != null) {
+            documentRepository.findByVersionIdOrderByOrderNoAsc(currentVersion.getId())
+                    .forEach(document -> documents.put(document.getId(), document));
+        }
         List<Map<String, Object>> payload = new ArrayList<>();
-        for (SearchChunk chunk : chunkRepository.findByPackageId(packageId)) {
+        List<SearchChunk> currentChunks = currentVersion == null
+                ? List.of()
+                : chunkRepository.findByVersionId(currentVersion.getId());
+        for (SearchChunk chunk : currentChunks) {
             ExtractedDocument document = documents.get(chunk.getDocumentId());
-            PackageVersion version = versions.get(chunk.getVersionId());
-            if (document == null || version == null) continue;
-            String entryFile = version.getEntryFile() == null ? document.getSourcePath() : version.getEntryFile();
-            payload.add(document(pkg, entryFile, document, chunk));
+            if (document == null) continue;
+            payload.add(document(pkg, currentVersion, document, chunk));
         }
         deleteByFilter("package_id = " + quoted(IdPrefix.PACKAGE.format(packageId)));
         if (!payload.isEmpty()) mutate("/indexes/" + uid() + "/documents?primaryKey=id", payload);
@@ -158,6 +175,8 @@ public class SearchIndexService {
                 item.put("package_id", hit.get("package_id"));
                 item.put("package_title", hit.get("package_title"));
                 item.put("version_id", hit.get("version_id"));
+                item.put("version_no", hit.get("version_no"));
+                item.put("is_current", hit.getOrDefault("is_current", true));
                 item.put("document_id", hit.get("document_id"));
                 item.put("document_title", hit.get("document_title"));
                 item.put("snippet", formatted.getOrDefault("content", hit.get("content")));
@@ -180,13 +199,13 @@ public class SearchIndexService {
             Map<UUID, ExtractedDocument> documents,
             List<SearchChunk> chunks
     ) {
-        return chunks.stream().map(chunk -> document(pkg, version.getEntryFile(),
+        return chunks.stream().map(chunk -> document(pkg, version,
                 documents.get(chunk.getDocumentId()), chunk)).toList();
     }
 
     private Map<String, Object> document(
             KnowledgePackage pkg,
-            String entryFile,
+            PackageVersion version,
             ExtractedDocument document,
             SearchChunk chunk
     ) {
@@ -194,6 +213,8 @@ public class SearchIndexService {
         value.put("id", IdPrefix.CHUNK.format(chunk.getId()));
         value.put("package_id", IdPrefix.PACKAGE.format(chunk.getPackageId()));
         value.put("version_id", IdPrefix.VERSION.format(chunk.getVersionId()));
+        value.put("version_no", version.getVersionNo());
+        value.put("is_current", chunk.getVersionId().equals(pkg.getCurrentVersionId()));
         value.put("document_id", IdPrefix.DOCUMENT.format(chunk.getDocumentId()));
         value.put("package_title", pkg.getTitle());
         value.put("document_title", document == null ? "" : document.getTitle());
@@ -211,6 +232,9 @@ public class SearchIndexService {
         value.put("visibility", pkg.getVisibility());
         value.put("source_path", document == null ? "" : document.getSourcePath());
         value.put("anchor", chunk.getAnchor());
+        String entryFile = version.getEntryFile() == null && document != null
+                ? document.getSourcePath()
+                : version.getEntryFile();
         value.put("preview_url", "/p/" + IdPrefix.PACKAGE.format(pkg.getId()) + "/v/"
                 + IdPrefix.VERSION.format(chunk.getVersionId()) + "/" + (entryFile == null ? "" : entryFile)
                 + (chunk.getAnchor() == null ? "" : "#" + chunk.getAnchor()));

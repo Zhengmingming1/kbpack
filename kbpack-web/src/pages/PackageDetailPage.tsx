@@ -32,16 +32,19 @@ import {
   Tooltip,
   Tree,
   Typography,
+  type MenuProps,
   type TableColumnsType,
 } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { listCollections, type CollectionItem } from '../api/collections';
 import {
   archivePackage,
   deletePackage,
   getPackage,
   packageDownloadUrl,
   replacePackageTags,
+  replacePackageCollections,
   setFavorite,
   updatePackage,
   type PackageDetail,
@@ -63,8 +66,8 @@ import { EmptyBlock, ErrorBlock, LoadingBlock } from '../components/common/Query
 import { StatusTag } from '../components/package/StatusTag';
 import { VersionDiffModal } from '../components/package/VersionDiffModal';
 import {
-  PACKAGE_STATUS_OPTIONS,
   PACKAGE_VISIBILITY_OPTIONS,
+  packageEditableStatusOptions,
   packageSourceLabel,
   packageVisibilityLabel,
 } from '../constants/packageOptions';
@@ -72,6 +75,14 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { formatBytes, formatDate } from '../utils/format';
 
 const REPARSE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+interface PackageEditValues {
+  title: string;
+  description?: string;
+  status: string;
+  visibility: string;
+  collection_ids?: string[];
+}
 
 function isParsing(status?: string | null) {
   const normalized = status?.toLowerCase();
@@ -101,6 +112,13 @@ function preferredEntryFile(nodes: FileNode[]) {
     || '';
 }
 
+function flattenCollections(items: CollectionItem[], level = 0): Array<CollectionItem & { level: number }> {
+  return items.flatMap((item) => [
+    { ...item, level },
+    ...flattenCollections(item.children || [], level + 1),
+  ]);
+}
+
 export function PackageDetailPage() {
   const { packageId = '' } = useParams();
   const navigate = useNavigate();
@@ -118,7 +136,7 @@ export function PackageDetailPage() {
   const [reparseEntryTouched, setReparseEntryTouched] = useState(false);
   const [reparseWatch, setReparseWatch] = useState<{ versionId: string; startedAt: number }>();
   const skippedReparseVersionIds = useRef(new Set<string>());
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<PackageEditValues>();
   const isCompact = useMediaQuery('(max-width: 1023px)');
 
   const packageQuery = useQuery({
@@ -135,6 +153,11 @@ export function PackageDetailPage() {
     queryKey: ['tags'],
     queryFn: listTags,
     enabled: tagOpen,
+  });
+  const collectionsQuery = useQuery({
+    queryKey: ['collections'],
+    queryFn: listCollections,
+    enabled: editOpen,
   });
   const reparseStatusQuery = useQuery({
     queryKey: ['reparse-status', packageId, reparseWatch?.versionId, reparseWatch?.startedAt],
@@ -245,6 +268,7 @@ export function PackageDetailPage() {
     void queryClient.invalidateQueries({ queryKey: ['package', packageId] });
     void queryClient.invalidateQueries({ queryKey: ['versions', packageId] });
     void queryClient.invalidateQueries({ queryKey: ['packages'] });
+    void queryClient.invalidateQueries({ queryKey: ['collections'] });
   };
 
   const actionMutation = useMutation({
@@ -266,7 +290,20 @@ export function PackageDetailPage() {
   });
 
   const editMutation = useMutation({
-    mutationFn: (values: Partial<PackageDetail>) => updatePackage(packageId, values),
+    mutationFn: async (values: PackageEditValues) => {
+      const { collection_ids = [], status, ...packageValues } = values;
+      const patch = status === packageQuery.data?.status
+        ? packageValues
+        : { ...packageValues, status };
+      await Promise.all([
+        updatePackage(packageId, patch),
+        replacePackageCollections(
+          packageId,
+          (packageQuery.data?.collections || []).map((collection) => collection.id),
+          collection_ids,
+        ),
+      ]);
+    },
     onSuccess: () => {
       message.success('知识包信息已更新');
       setEditOpen(false);
@@ -378,12 +415,20 @@ export function PackageDetailPage() {
   }
 
   const pkg = packageQuery.data;
+  const canEdit = pkg.can_edit !== false;
+  const canDelete = pkg.can_delete !== false;
+  const canReparse = pkg.can_reparse !== false;
+  const canManageVersions = pkg.can_manage_versions !== false;
+  const canArchive = canEdit && (pkg.status === 'active' || pkg.status === 'deprecated');
+  const editableStatusOptions = packageEditableStatusOptions(pkg.status);
+  const collectionOptions = flattenCollections(collectionsQuery.data || []);
   const openEdit = () => {
     form.setFieldsValue({
       title: pkg.title,
       description: pkg.description,
       status: pkg.status,
       visibility: pkg.visibility,
+      collection_ids: (pkg.collections || []).map((collection) => collection.id),
     });
     setEditOpen(true);
   };
@@ -403,6 +448,16 @@ export function PackageDetailPage() {
     });
   };
 
+  const confirmArchive = () => {
+    modal.confirm({
+      title: '归档这个知识包？',
+      content: '归档后知识包会保留内容，但当前状态不能再恢复为活跃。',
+      okText: '确认归档',
+      cancelText: '取消',
+      onOk: () => actionMutation.mutateAsync('archive'),
+    });
+  };
+
   const chapterList = (
     <div className="chapter-list">
       {documentsQuery.isPending && currentVersion ? <LoadingBlock rows={5} /> : null}
@@ -413,12 +468,14 @@ export function PackageDetailPage() {
       <List
         dataSource={documentsQuery.data || []}
         renderItem={(document) => (
-          <List.Item className="chapter-row" onClick={() => navigate(`/documents/${document.id}`)}>
-            <span className="chapter-number">{String(document.order_no).padStart(2, '0')}</span>
-            <div>
-              <Typography.Text strong>{document.title}</Typography.Text>
-              <Typography.Text type="secondary">{document.word_count ? `${document.word_count} 字` : document.doc_type}</Typography.Text>
-            </div>
+          <List.Item>
+            <Link className="chapter-row" to={`/documents/${document.id}`}>
+              <span className="chapter-number">{String(document.order_no).padStart(2, '0')}</span>
+              <div>
+                <Typography.Text strong>{document.title}</Typography.Text>
+                <Typography.Text type="secondary">{document.word_count ? `${document.word_count} 字` : document.doc_type}</Typography.Text>
+              </div>
+            </Link>
           </List.Item>
         )}
       />
@@ -457,51 +514,74 @@ export function PackageDetailPage() {
       title: '操作',
       width: 120,
       align: 'right',
-      render: (_, version) => (
-        <Dropdown
-          trigger={['click']}
-          menu={{
-            items: [
-              { key: 'preview', icon: <EyeOutlined />, label: '预览' },
-              { key: 'download', icon: <DownloadOutlined />, label: '下载' },
-              {
-                key: 'diff',
-                icon: <DiffOutlined />,
-                label: '与其他版本对比',
-                disabled: (versionsQuery.data?.length || 0) < 2,
-              },
-              { key: 'current', label: '设为当前版本', disabled: version.is_current || version.id === pkg.current_version?.id },
-              {
+      render: (_, version) => {
+        const versionMenuItems: MenuProps['items'] = [
+          { key: 'preview', icon: <EyeOutlined />, label: '预览' },
+          { key: 'download', icon: <DownloadOutlined />, label: '下载' },
+          {
+            key: 'diff',
+            icon: <DiffOutlined />,
+            label: '与其他版本对比',
+            disabled: (versionsQuery.data?.length || 0) < 2,
+          },
+          ...(canManageVersions
+            ? [{
+                key: 'current',
+                label: '设为当前版本',
+                disabled: version.is_current
+                  || version.id === pkg.current_version?.id
+                  || version.parse_status.toLowerCase() !== 'success',
+              }]
+            : []),
+          ...(canReparse
+            ? [{
                 key: 'reparse',
                 icon: <ReloadOutlined />,
                 label: '重新解析',
                 disabled: Boolean(reparseWatch) || isParsing(version.parse_status),
+              }]
+            : []),
+          ...(canManageVersions
+            ? [
+                { type: 'divider' as const },
+                {
+                  key: 'delete',
+                  icon: <DeleteOutlined />,
+                  label: '删除版本',
+                  danger: true,
+                  disabled: version.is_current || version.id === pkg.current_version?.id,
+                },
+              ]
+            : []),
+        ];
+        return (
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: versionMenuItems,
+              onClick: ({ key }) => {
+                if (key === 'preview') navigate(`/packages/${packageId}/preview/${version.id}`);
+                else if (key === 'download') window.location.assign(packageDownloadUrl(version.id));
+                else if (key === 'diff') openDiff(version);
+                else if (key === 'current') versionMutation.mutate({ action: 'current', version });
+                else if (key === 'reparse') openReparse(version);
+                else if (key === 'delete') {
+                  modal.confirm({
+                    title: `删除 v${version.version_no}？`,
+                    content: '此操作会删除该版本的文件、抽取内容和索引记录。',
+                    okText: '删除版本',
+                    okButtonProps: { danger: true },
+                    cancelText: '取消',
+                    onOk: () => versionMutation.mutateAsync({ action: 'delete', version }),
+                  });
+                }
               },
-              { type: 'divider' },
-              { key: 'delete', icon: <DeleteOutlined />, label: '删除版本', danger: true, disabled: version.is_current || version.id === pkg.current_version?.id },
-            ],
-            onClick: ({ key }) => {
-              if (key === 'preview') navigate(`/packages/${packageId}/preview/${version.id}`);
-              else if (key === 'download') window.location.assign(packageDownloadUrl(version.id));
-              else if (key === 'diff') openDiff(version);
-              else if (key === 'current') versionMutation.mutate({ action: 'current', version });
-              else if (key === 'reparse') openReparse(version);
-              else if (key === 'delete') {
-                modal.confirm({
-                  title: `删除 v${version.version_no}？`,
-                  content: '此操作会删除该版本的文件、抽取内容和索引记录。',
-                  okText: '删除版本',
-                  okButtonProps: { danger: true },
-                  cancelText: '取消',
-                  onOk: () => versionMutation.mutateAsync({ action: 'delete', version }),
-                });
-              }
-            },
-          }}
-        >
-          <Button type="text" icon={<MoreOutlined />} aria-label={`管理 v${version.version_no}`} />
-        </Dropdown>
-      ),
+            }}
+          >
+            <Button type="text" icon={<MoreOutlined />} aria-label={`管理 v${version.version_no}`} />
+          </Dropdown>
+        );
+      },
     },
   ];
 
@@ -541,8 +621,6 @@ export function PackageDetailPage() {
         <div><span>版本数</span><strong>{pkg.versions_count ?? versionsQuery.data?.length ?? '—'}</strong></div>
         <div><span>解压大小</span><strong>{formatBytes(currentVersion?.unpacked_size ?? pkg.unpacked_size)}</strong></div>
       </div>
-      <div className="section-heading"><h3>章节列表</h3></div>
-      {chapterList}
     </div>
   );
 
@@ -560,12 +638,29 @@ export function PackageDetailPage() {
     <EmptyBlock title="暂无质量记录" description="解析流水线没有报告需要复核的问题。" />
   );
 
+  const packageMetadata = (
+    <Descriptions column={1} size="small" colon={false}>
+      <Descriptions.Item label="来源">{pkg.source_name || packageSourceLabel(pkg.source_type) || '手工上传'}</Descriptions.Item>
+      <Descriptions.Item label="可见性">{packageVisibilityLabel(pkg.visibility)}</Descriptions.Item>
+      <Descriptions.Item label="创建时间">{formatDate(pkg.created_at)}</Descriptions.Item>
+      <Descriptions.Item label="知识包 ID"><Typography.Text copyable>{pkg.id}</Typography.Text></Descriptions.Item>
+    </Descriptions>
+  );
+
+  const currentVersionMetadata = currentVersion ? (
+    <Descriptions column={1} size="small" colon={false}>
+      <Descriptions.Item label="版本">v{currentVersion.version_no}</Descriptions.Item>
+      <Descriptions.Item label="状态"><StatusTag status={currentVersion.parse_status} /></Descriptions.Item>
+      <Descriptions.Item label="原始文件">{currentVersion.original_filename}</Descriptions.Item>
+      <Descriptions.Item label="存储">{formatBytes(currentVersion.unpacked_size)}</Descriptions.Item>
+    </Descriptions>
+  ) : <EmptyBlock title="暂无版本" />;
+
   const desktopContent = (
     <Tabs
       defaultActiveKey="overview"
       items={[
         { key: 'overview', label: '概览', children: overview },
-        { key: 'content', label: '抽取内容', children: chapterList },
         { key: 'versions', label: '版本历史', children: versionsTable },
         { key: 'quality', label: '质量信息', children: quality },
       ]}
@@ -581,9 +676,38 @@ export function PackageDetailPage() {
         { key: 'chapters', label: '章节', children: chapterList },
         { key: 'versions', label: '版本', children: versionsTable },
         { key: 'files', label: '文件', children: fileTree },
+        {
+          key: 'info',
+          label: '信息',
+          children: (
+            <div className="mobile-detail-info">
+              <section>
+                <div className="section-heading"><h3>元数据</h3></div>
+                {packageMetadata}
+              </section>
+              <section>
+                <div className="section-heading"><h3>当前版本</h3></div>
+                {currentVersionMetadata}
+              </section>
+            </div>
+          ),
+        },
+        { key: 'quality', label: '质量', children: quality },
       ]}
     />
   );
+
+  const packageMenuItems: MenuProps['items'] = [
+    { key: 'favorite', icon: pkg.is_favorite ? <StarFilled /> : <StarOutlined />, label: pkg.is_favorite ? '取消收藏' : '收藏' },
+    ...(canEdit ? [{ key: 'edit', icon: <EditOutlined />, label: '编辑信息' }] : []),
+    ...(canArchive ? [{ key: 'archive', icon: <InboxOutlined />, label: '归档' }] : []),
+    ...(canDelete
+      ? [
+          { type: 'divider' as const },
+          { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
+        ]
+      : []),
+  ];
 
   return (
     <div className="package-detail-page">
@@ -596,7 +720,7 @@ export function PackageDetailPage() {
           <div className="detail-title-meta">
             <StatusTag status={pkg.status} />
             {(pkg.tags || []).map((tag) => <span className="text-tag" key={tag}>{tag}</span>)}
-            <Tooltip title="修改标签">
+            {canEdit ? <Tooltip title="修改标签">
               <Button
                 className="detail-tag-edit"
                 type="text"
@@ -605,7 +729,7 @@ export function PackageDetailPage() {
                 aria-label="修改标签"
                 onClick={openTagEdit}
               />
-            </Tooltip>
+            </Tooltip> : null}
             <Typography.Text type="secondary">更新于 {formatDate(pkg.updated_at)}</Typography.Text>
           </div>
         </div>
@@ -618,28 +742,29 @@ export function PackageDetailPage() {
           >
             预览
           </Button>
-          <Button icon={<FileSearchOutlined />} onClick={() => navigate(`/search?package_id=${encodeURIComponent(packageId)}`)}>
+          <Button
+            icon={<FileSearchOutlined />}
+            aria-label="搜索本知识包"
+            onClick={() => navigate(`/search?package_id=${encodeURIComponent(packageId)}`)}
+          >
             <span className="desktop-only">搜索本包</span>
           </Button>
-          <Button
-            icon={<CloudUploadOutlined />}
-            onClick={() => navigate(`/packages/upload?packageId=${encodeURIComponent(packageId)}`)}
-          >
-            <span className="desktop-only">上传新版本</span>
-          </Button>
+          {canManageVersions ? (
+            <Button
+              icon={<CloudUploadOutlined />}
+              aria-label="上传新版本"
+              onClick={() => navigate(`/packages/upload?packageId=${encodeURIComponent(packageId)}`)}
+            >
+              <span className="desktop-only">上传新版本</span>
+            </Button>
+          ) : null}
           <Dropdown
             menu={{
-              items: [
-                { key: 'favorite', icon: pkg.is_favorite ? <StarFilled /> : <StarOutlined />, label: pkg.is_favorite ? '取消收藏' : '收藏' },
-                { key: 'edit', icon: <EditOutlined />, label: '编辑信息' },
-                { key: 'archive', icon: <InboxOutlined />, label: '归档' },
-                { type: 'divider' },
-                { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
-              ],
+              items: packageMenuItems,
               onClick: ({ key }) => {
                 if (key === 'favorite') actionMutation.mutate('favorite');
                 if (key === 'edit') openEdit();
-                if (key === 'archive') actionMutation.mutate('archive');
+                if (key === 'archive') confirmArchive();
                 if (key === 'delete') confirmDelete();
               },
             }}
@@ -665,23 +790,11 @@ export function PackageDetailPage() {
           <aside className="detail-right-column">
             <section className="surface surface-pad">
               <div className="section-heading"><h3>元数据</h3></div>
-              <Descriptions column={1} size="small" colon={false}>
-                <Descriptions.Item label="来源">{pkg.source_name || packageSourceLabel(pkg.source_type) || '手工上传'}</Descriptions.Item>
-                <Descriptions.Item label="可见性">{packageVisibilityLabel(pkg.visibility)}</Descriptions.Item>
-                <Descriptions.Item label="创建时间">{formatDate(pkg.created_at)}</Descriptions.Item>
-                <Descriptions.Item label="知识包 ID"><Typography.Text copyable>{pkg.id}</Typography.Text></Descriptions.Item>
-              </Descriptions>
+              {packageMetadata}
             </section>
             <section className="surface surface-pad">
               <div className="section-heading"><h3>当前版本</h3></div>
-              {currentVersion ? (
-                <Descriptions column={1} size="small" colon={false}>
-                  <Descriptions.Item label="版本">v{currentVersion.version_no}</Descriptions.Item>
-                  <Descriptions.Item label="状态"><StatusTag status={currentVersion.parse_status} /></Descriptions.Item>
-                  <Descriptions.Item label="原始文件">{currentVersion.original_filename}</Descriptions.Item>
-                  <Descriptions.Item label="存储">{formatBytes(currentVersion.unpacked_size)}</Descriptions.Item>
-                </Descriptions>
-              ) : <EmptyBlock title="暂无版本" />}
+              {currentVersionMetadata}
             </section>
           </aside>
         </div>
@@ -704,10 +817,22 @@ export function PackageDetailPage() {
             <Input.TextArea rows={4} maxLength={2000} showCount />
           </Form.Item>
           <Form.Item name="status" label="状态">
-            <Select options={PACKAGE_STATUS_OPTIONS} />
+            <Select options={editableStatusOptions} disabled={editableStatusOptions.length <= 1} />
           </Form.Item>
           <Form.Item name="visibility" label="可见性">
             <Select options={PACKAGE_VISIBILITY_OPTIONS} />
+          </Form.Item>
+          <Form.Item name="collection_ids" label="集合">
+            <Select
+              mode="multiple"
+              allowClear
+              loading={collectionsQuery.isPending}
+              placeholder="选择集合"
+              options={collectionOptions.map((collection) => ({
+                value: collection.id,
+                label: `${'　'.repeat(collection.level)}${collection.name}`,
+              }))}
+            />
           </Form.Item>
         </Form>
       </Modal>

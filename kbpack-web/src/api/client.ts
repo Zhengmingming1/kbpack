@@ -20,6 +20,10 @@ export const apiClient = axios.create({
   },
 });
 
+export function isUnauthorizedError(error: unknown) {
+  return axios.isAxiosError(error) && error.response?.status === 401;
+}
+
 apiClient.interceptors.response.use(
   (res) => res,
   (error) => {

@@ -13,6 +13,7 @@ import com.kbpack.pkg.KnowledgePackage;
 import com.kbpack.pkg.KnowledgePackageRepository;
 import com.kbpack.pkg.PackageCollectionRepository;
 import com.kbpack.pkg.PackageTagRepository;
+import com.kbpack.pkg.PackageVersion;
 import com.kbpack.pkg.PackageVersionRepository;
 import com.kbpack.pkg.CollectionRepository;
 import com.kbpack.pkg.TagRepository;
@@ -40,6 +41,8 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/api/v1/search")
 public class SearchController {
+    private enum VersionScope { current, history, all }
+
     private final SearchIndexService indexService;
     private final SearchChunkRepository chunkRepository;
     private final ExtractedDocumentRepository documentRepository;
@@ -86,6 +89,7 @@ public class SearchController {
             @RequestParam(required = false) String source,
             @RequestParam(required = false) String status,
             @RequestParam(name = "package_id", required = false) String packageId,
+            @RequestParam(name = "version_scope", defaultValue = "current") String versionScope,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(name = "page_size", defaultValue = "20") int pageSize,
             Authentication authentication
@@ -97,7 +101,12 @@ public class SearchController {
         String tagName = resolveTag(tag);
         String collectionId = resolveCollection(collection);
         String resolvedPackageId = resolvePackageId(packageId);
+        VersionScope scope = parseVersionScope(versionScope);
         String filter = buildFilter(user, tagName, collectionId, source, status, resolvedPackageId);
+        if (scope != VersionScope.current) {
+            return fallback(q.trim(), currentPage, size, user, tagName, collectionId, source, status,
+                    resolvedPackageId, scope);
+        }
         try {
             SearchIndexService.SearchPage result = indexService.search(q.trim(), currentPage, size, filter);
             List<Map<String, Object>> visible = result.items().stream()
@@ -106,7 +115,7 @@ public class SearchController {
         } catch (ApiException e) {
             if (e.getCode() != ErrorCode.SEARCH_UNAVAILABLE.getCode()) throw e;
             return fallback(q.trim(), currentPage, size, user, tagName, collectionId, source, status,
-                    resolvedPackageId);
+                    resolvedPackageId, scope);
         }
     }
 
@@ -132,7 +141,8 @@ public class SearchController {
 
     private PageResponse<Map<String, Object>> fallback(
             String query, int page, int size, AppUser user,
-            String tag, String collection, String source, String status, String packageId
+            String tag, String collection, String source, String status, String packageId,
+            VersionScope versionScope
     ) {
         String needle = query.toLowerCase(Locale.ROOT);
         List<Map<String, Object>> all = new ArrayList<>();
@@ -141,7 +151,11 @@ public class SearchController {
             KnowledgePackage pkg = packageRepository.findActiveById(chunk.getPackageId()).orElse(null);
             if (pkg == null || !canAccess(pkg, user)) continue;
             if (packageId != null && !IdPrefix.PACKAGE.format(pkg.getId()).equals(packageId)) continue;
-            if (versionRepository.findActiveById(chunk.getVersionId()).isEmpty()) continue;
+            boolean isCurrent = chunk.getVersionId().equals(pkg.getCurrentVersionId());
+            if (versionScope == VersionScope.current && !isCurrent) continue;
+            if (versionScope == VersionScope.history && isCurrent) continue;
+            PackageVersion version = versionRepository.findActiveById(chunk.getVersionId()).orElse(null);
+            if (version == null || version.getParseStatus() != PackageVersion.ParseStatus.success) continue;
             if (source != null && !source.isBlank() && !pkg.getSourceType().name().equalsIgnoreCase(source)) continue;
             if (status != null && !status.isBlank() && !pkg.getStatus().name().equalsIgnoreCase(status)) continue;
             if (tag != null && !packageHasTag(pkg, tag)) continue;
@@ -152,11 +166,13 @@ public class SearchController {
             item.put("package_id", IdPrefix.PACKAGE.format(pkg.getId()));
             item.put("package_title", pkg.getTitle());
             item.put("version_id", IdPrefix.VERSION.format(chunk.getVersionId()));
+            item.put("version_no", version.getVersionNo());
+            item.put("is_current", isCurrent);
             item.put("document_id", IdPrefix.DOCUMENT.format(document.getId()));
             item.put("document_title", document.getTitle());
             item.put("snippet", highlight(snippet(chunk.getContent(), needle), query));
             item.put("heading", chunk.getHeading());
-            item.put("tags", List.of());
+            item.put("tags", packageTags(pkg));
             item.put("updated_at", pkg.getUpdatedAt());
             item.put("anchor", chunk.getAnchor());
             all.add(item);
@@ -171,8 +187,15 @@ public class SearchController {
         try {
             var packageId = IdPrefix.PACKAGE.parse(String.valueOf(item.get("package_id")));
             var versionId = IdPrefix.VERSION.parse(String.valueOf(item.get("version_id")));
-            return versionRepository.findActiveById(versionId).filter(version -> version.getPackageId().equals(packageId)).isPresent()
-                    && packageRepository.findActiveById(packageId).map(pkg -> canAccess(pkg, user)).orElse(false);
+            PackageVersion version = versionRepository.findActiveById(versionId)
+                    .filter(candidate -> candidate.getPackageId().equals(packageId))
+                    .filter(candidate -> candidate.getParseStatus() == PackageVersion.ParseStatus.success)
+                    .orElse(null);
+            if (version == null) return false;
+            return packageRepository.findActiveById(packageId)
+                    .filter(pkg -> versionId.equals(pkg.getCurrentVersionId()))
+                    .map(pkg -> canAccess(pkg, user))
+                    .orElse(false);
         } catch (Exception e) {
             return false;
         }
@@ -217,6 +240,14 @@ public class SearchController {
         }
     }
 
+    private VersionScope parseVersionScope(String value) {
+        try {
+            return VersionScope.valueOf(value == null ? "current" : value.toLowerCase(Locale.ROOT));
+        } catch (IllegalArgumentException error) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "version_scope 参数无效");
+        }
+    }
+
     private String resolveTag(String value) {
         if (value == null || value.isBlank()) return null;
         if (!value.regionMatches(true, 0, "tag_", 0, 4)) return value.trim();
@@ -248,6 +279,16 @@ public class SearchController {
         var ids = packageTagRepository.findAllByIdPackageId(pkg.getId()).stream()
                 .map(link -> link.getId().getTagId()).toList();
         return tagRepository.findAllById(ids).stream().anyMatch(tag -> tag.getName().equalsIgnoreCase(name));
+    }
+
+    private List<String> packageTags(KnowledgePackage pkg) {
+        var ids = packageTagRepository.findAllByIdPackageId(pkg.getId()).stream()
+                .map(link -> link.getId().getTagId())
+                .toList();
+        return tagRepository.findAllById(ids).stream()
+                .map(tag -> tag.getName())
+                .sorted(String.CASE_INSENSITIVE_ORDER)
+                .toList();
     }
 
     private boolean packageHasCollection(KnowledgePackage pkg, String collectionId) {

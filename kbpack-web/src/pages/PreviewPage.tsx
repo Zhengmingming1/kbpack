@@ -374,6 +374,7 @@ export function PreviewPage() {
           <Button
             type="text"
             icon={<FileTextOutlined />}
+            aria-label="阅读模式"
             disabled={!documents.data?.length}
             onClick={() => documents.data?.[0] && navigate(`/documents/${documents.data[0].id}`)}
           >

@@ -18,7 +18,7 @@ import {
   Space,
   Typography,
 } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { listCollections, type CollectionItem } from '../api/collections';
 import { getApiErrorMessage } from '../api/client';
@@ -29,6 +29,7 @@ import { PackageCard } from '../components/package/PackageCard';
 import { PackageTable } from '../components/package/PackageTable';
 import { PACKAGE_SOURCE_OPTIONS, PACKAGE_STATUS_OPTIONS } from '../constants/packageOptions';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useSession } from '../hooks/useSession';
 import { useUiStore } from '../stores/uiStore';
 
 function flattenCollections(items: CollectionItem[], level = 0): Array<CollectionItem & { level: number }> {
@@ -42,10 +43,14 @@ export function PackageListPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { message } = App.useApp();
+  const session = useSession();
   const [params, setParams] = useSearchParams();
   const [keyword, setKeyword] = useState(params.get('keyword') || '');
   const isMobile = useMediaQuery('(max-width: 639px)');
   const { filterPanelOpen, packageViewMode, setFilterPanelOpen, setPackageViewMode } = useUiStore();
+  const canWriteContent = session.data?.role?.toLowerCase() !== 'viewer';
+
+  useEffect(() => setKeyword(params.get('keyword') || ''), [params]);
 
   const page = Math.max(Number(params.get('page')) || 1, 1);
   const filters = useMemo(
@@ -157,15 +162,15 @@ export function PackageListPage() {
     <div>
       <div className="page-heading">
         <div>
-          <span className="eyebrow">Knowledge packages</span>
+          <span className="eyebrow">知识包管理</span>
           <Typography.Title level={1}>知识包</Typography.Title>
           <Typography.Paragraph type="secondary">
             {packages.data ? `共 ${packages.data.total} 个知识包` : '浏览、筛选并管理归档内容'}
           </Typography.Paragraph>
         </div>
-        <Button className="redundant-mobile-action" type="primary" icon={<CloudUploadOutlined />} onClick={() => navigate('/packages/upload')}>
+        {canWriteContent ? <Button className="redundant-mobile-action" type="primary" icon={<CloudUploadOutlined />} onClick={() => navigate('/packages/upload')}>
           上传
-        </Button>
+        </Button> : null}
       </div>
 
       <div className="package-list-layout">

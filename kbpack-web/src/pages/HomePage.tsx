@@ -1,18 +1,21 @@
 import {
   ArrowRightOutlined,
+  BookFilled,
   CloudUploadOutlined,
   DatabaseOutlined,
   FileTextOutlined,
   InboxOutlined,
+  ReadOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Card, Col, Row, Space, Statistic, Typography } from 'antd';
+import { App, Button, Card, Col, Progress, Row, Space, Statistic, Typography } from 'antd';
 import { Link, useNavigate } from 'react-router-dom';
 import { listPackages } from '../api/packages';
 import { getStats } from '../api/stats';
-import { listTasks, retryTask } from '../api/tasks';
+import { listActionableTasks, retryTask } from '../api/tasks';
 import { getApiErrorMessage } from '../api/client';
+import { listReadingBookmarks, listRecentReading, readingItemTitle } from '../api/reading';
 import { EmptyBlock, ErrorBlock, LoadingBlock } from '../components/common/QueryState';
 import { PackageCard } from '../components/package/PackageCard';
 import { StatusTag } from '../components/package/StatusTag';
@@ -33,9 +36,19 @@ export function HomePage() {
     queryKey: ['packages', 'home', 'favorites'],
     queryFn: () => listPackages({ favorite: true, page: 1, page_size: 4 }),
   });
-  const failedTasks = useQuery({
-    queryKey: ['tasks', 'failed', 'home'],
-    queryFn: () => listTasks({ status: 'failed', page: 1, page_size: 4 }),
+  const actionableTasks = useQuery({
+    queryKey: ['tasks', 'actionable', 'home'],
+    queryFn: listActionableTasks,
+    retry: false,
+  });
+  const recentReading = useQuery({
+    queryKey: ['reading', 'recent'],
+    queryFn: listRecentReading,
+    retry: false,
+  });
+  const bookmarks = useQuery({
+    queryKey: ['reading', 'bookmarks'],
+    queryFn: listReadingBookmarks,
     retry: false,
   });
   const retryMutation = useMutation({
@@ -48,27 +61,28 @@ export function HomePage() {
   });
 
   const displayName = session.data?.display_name || session.data?.username || '你';
+  const canWriteContent = session.data?.role?.toLowerCase() !== 'viewer';
 
   return (
     <div className="dashboard-page">
       <div className="page-heading">
         <div>
-          <span className="eyebrow">Knowledge workspace</span>
+          <span className="eyebrow">知识工作台</span>
           <Typography.Title level={1}>你好，{displayName}</Typography.Title>
           <Typography.Paragraph type="secondary">
             从最近更新的知识继续，或处理尚未完成的解析任务。
           </Typography.Paragraph>
         </div>
-        <Button className="redundant-mobile-action" type="primary" icon={<CloudUploadOutlined />} onClick={() => navigate('/packages/upload')}>
+        {canWriteContent ? <Button className="redundant-mobile-action" type="primary" icon={<CloudUploadOutlined />} onClick={() => navigate('/packages/upload')}>
           上传知识包
-        </Button>
+        </Button> : null}
       </div>
 
       <section className="dashboard-stats" aria-label="知识库统计">
         <Card>
           <Statistic
             title="知识包总数"
-            value={stats.data?.package_count ?? 0}
+            value={stats.data ? stats.data.package_count : '—'}
             prefix={<InboxOutlined />}
             loading={stats.isPending}
           />
@@ -76,7 +90,7 @@ export function HomePage() {
         <Card>
           <Statistic
             title="抽取章节"
-            value={stats.data?.document_count ?? 0}
+            value={stats.data ? stats.data.document_count ?? 0 : '—'}
             prefix={<FileTextOutlined />}
             loading={stats.isPending}
           />
@@ -92,7 +106,7 @@ export function HomePage() {
         <Card className={(stats.data?.parse_failed_count || 0) > 0 ? 'stat-warning' : ''}>
           <Statistic
             title="解析失败"
-            value={stats.data?.parse_failed_count ?? 0}
+            value={stats.data ? stats.data.parse_failed_count ?? 0 : '—'}
             prefix={<WarningOutlined />}
             loading={stats.isPending}
           />
@@ -111,6 +125,38 @@ export function HomePage() {
         <div className="dashboard-main">
           <section className="dashboard-section">
             <div className="section-heading">
+              <h2>继续阅读</h2>
+              <ReadOutlined aria-hidden="true" />
+            </div>
+            {recentReading.isPending ? <LoadingBlock rows={3} /> : null}
+            {recentReading.isError ? (
+              <Typography.Paragraph type="secondary">阅读记录暂不可用，知识包浏览不受影响。</Typography.Paragraph>
+            ) : null}
+            {recentReading.data && recentReading.data.length === 0 ? (
+              <EmptyBlock title="还没有阅读记录" description="打开任一章节后，阅读进度会出现在这里。" />
+            ) : null}
+            {recentReading.data?.length ? (
+              <div className="reading-grid">
+                {recentReading.data.slice(0, 4).map((item) => {
+                  const progress = Math.min(100, Math.max(0, Math.round(item.progress || 0)));
+                  return (
+                    <Link className="reading-card" key={item.document_id} to={`/documents/${item.document_id}`}>
+                      <span className="reading-card-kicker">{item.package_title || '知识包'}</span>
+                      <strong>{readingItemTitle(item)}</strong>
+                      <Progress percent={progress} size="small" showInfo={false} />
+                      <span className="reading-card-meta">
+                        {progress > 0 ? `已读 ${progress}%` : '开始阅读'}
+                        <time>{formatRelativeDate(item.last_read_at || item.updated_at)}</time>
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="dashboard-section">
+            <div className="section-heading">
               <h2>最近更新</h2>
               <Link className="section-link" to="/packages">
                 查看全部 <ArrowRightOutlined />
@@ -123,12 +169,14 @@ export function HomePage() {
             {recent.data && recent.data.items.length === 0 ? (
               <EmptyBlock
                 title="还没有知识包"
-                description="上传第一个 HTML 知识包，开始建立你的知识资产库。"
-                action={
+                description={canWriteContent
+                  ? '上传第一个 HTML 知识包，开始建立你的知识资产库。'
+                  : '当前没有可查看的知识包。'}
+                action={canWriteContent ? (
                   <Button type="primary" onClick={() => navigate('/packages/upload')}>
                     上传知识包
                   </Button>
-                }
+                ) : undefined}
               />
             ) : null}
             {recent.data?.items.length ? (
@@ -167,34 +215,61 @@ export function HomePage() {
         <aside className="dashboard-aside">
           <section className="aside-section">
             <div className="section-heading">
+              <h3>阅读书签</h3>
+              <BookFilled aria-hidden="true" />
+            </div>
+            {bookmarks.isPending ? <LoadingBlock rows={3} /> : null}
+            {bookmarks.isError ? (
+              <Typography.Paragraph type="secondary">书签暂不可用。</Typography.Paragraph>
+            ) : null}
+            {bookmarks.data && bookmarks.data.length === 0 ? (
+              <EmptyBlock title="还没有书签" description="在阅读模式中收藏重要章节。" />
+            ) : null}
+            <div className="bookmark-list">
+              {bookmarks.data?.slice(0, 6).map((item) => (
+                <Link className="bookmark-row" key={item.document_id} to={`/documents/${item.document_id}`}>
+                  <BookFilled />
+                  <span>
+                    <strong>{readingItemTitle(item)}</strong>
+                    <small>{item.package_title || '知识包'}</small>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
+
+          <section className="aside-section">
+            <div className="section-heading">
               <h3>待处理任务</h3>
             </div>
-            {failedTasks.isPending ? <LoadingBlock rows={3} /> : null}
-            {failedTasks.isError ? (
+            {actionableTasks.isPending ? <LoadingBlock rows={3} /> : null}
+            {actionableTasks.isError ? (
               <Typography.Paragraph type="secondary">
                 任务服务暂不可用，其他知识浏览不受影响。
               </Typography.Paragraph>
             ) : null}
-            {failedTasks.data && failedTasks.data.items.length === 0 ? (
+            {actionableTasks.data && actionableTasks.data.length === 0 ? (
               <EmptyBlock title="没有待处理任务" />
             ) : null}
             <div className="task-list">
-              {failedTasks.data?.items.map((task) => (
+              {actionableTasks.data?.map((task) => (
                 <div className="task-row" key={task.id}>
                   <div>
                     <StatusTag status={task.status} />
-                    <Typography.Text strong>{task.package_title || '知识包解析任务'}</Typography.Text>
+                    {task.package_id ? (
+                      <Link to={`/packages/${task.package_id}`}><Typography.Text strong>{task.package_title || '知识包解析任务'}</Typography.Text></Link>
+                    ) : <Typography.Text strong>{task.package_title || '知识包解析任务'}</Typography.Text>}
                     <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }}>
-                      {task.error_message || '解析未完成'}
+                      {task.error_message || (task.status === 'processing' ? '正在抽取内容' : task.status === 'retry_scheduled' ? '等待自动重试' : '等待解析')}
                     </Typography.Paragraph>
                   </div>
-                  <Button
+                  {task.status === 'failed' && task.can_retry !== false ? <Button
                     size="small"
                     loading={retryMutation.isPending && retryMutation.variables === task.id}
                     onClick={() => retryMutation.mutate(task.id)}
                   >
                     重试
-                  </Button>
+                  </Button> : null}
                 </div>
               ))}
             </div>
@@ -217,7 +292,7 @@ export function HomePage() {
             ) : null}
           </section>
 
-          <section className="quick-actions">
+          {canWriteContent ? <section className="quick-actions">
             <Row gutter={[10, 10]}>
               <Col span={12}>
                 <Button block onClick={() => navigate('/packages/upload')}>上传</Button>
@@ -226,7 +301,7 @@ export function HomePage() {
                 <Button block onClick={() => navigate('/collections')}>新建集合</Button>
               </Col>
             </Row>
-          </section>
+          </section> : null}
         </aside>
       </div>
     </div>

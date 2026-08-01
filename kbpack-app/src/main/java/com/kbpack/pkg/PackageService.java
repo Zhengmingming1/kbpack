@@ -41,6 +41,7 @@ public class PackageService {
 
     private final KnowledgePackageRepository packageRepository;
     private final PackageVersionRepository versionRepository;
+    private final PackageAssetRepository assetRepository;
     private final TagRepository tagRepository;
     private final PackageTagRepository packageTagRepository;
     private final CollectionRepository collectionRepository;
@@ -53,6 +54,7 @@ public class PackageService {
     public PackageService(
             KnowledgePackageRepository packageRepository,
             PackageVersionRepository versionRepository,
+            PackageAssetRepository assetRepository,
             TagRepository tagRepository,
             PackageTagRepository packageTagRepository,
             CollectionRepository collectionRepository,
@@ -64,6 +66,7 @@ public class PackageService {
     ) {
         this.packageRepository = packageRepository;
         this.versionRepository = versionRepository;
+        this.assetRepository = assetRepository;
         this.tagRepository = tagRepository;
         this.packageTagRepository = packageTagRepository;
         this.collectionRepository = collectionRepository;
@@ -85,9 +88,9 @@ public class PackageService {
         KnowledgePackage pkg = new KnowledgePackage();
         pkg.setTitle(normalizeTitle(title));
         pkg.setSlug(uniqueSlug(pkg.getTitle()));
-        pkg.setDescription(description);
+        pkg.setDescription(normalizeDescription(description));
         pkg.setSourceType(sourceType == null ? KnowledgePackage.SourceType.manual : sourceType);
-        pkg.setSourceName(sourceName);
+        pkg.setSourceName(normalizeSourceName(sourceName));
         pkg.setStatus(KnowledgePackage.Status.draft);
         pkg.setVisibility("private");
         pkg.setOwnerId(ownerId);
@@ -100,6 +103,48 @@ public class PackageService {
                 Map.of("source_type", pkg.getSourceType().name()),
                 null
         );
+        return pkg;
+    }
+
+    @Transactional
+    public KnowledgePackage replaceUploadMetadata(
+            UUID packageId,
+            String title,
+            String description,
+            KnowledgePackage.SourceType sourceType,
+            String sourceName,
+            List<String> tagNames,
+            List<UUID> collectionIds,
+            AppUser actor,
+            String ip
+    ) {
+        KnowledgePackage pkg = lockWritablePackage(packageId, actor);
+        if (title != null && !title.isBlank()) {
+            pkg.setTitle(normalizeTitle(title));
+        }
+        pkg.setDescription(normalizeDescription(description));
+        pkg.setSourceType(sourceType == null ? KnowledgePackage.SourceType.manual : sourceType);
+        pkg.setSourceName(normalizeSourceName(sourceName));
+
+        LinkedHashSet<String> normalizedTagNames = normalizeTagNames(
+                tagNames == null ? List.of() : tagNames
+        );
+        replaceTagLinks(packageId, normalizedTagNames);
+        LinkedHashSet<UUID> normalizedCollectionIds = new LinkedHashSet<>(
+                collectionIds == null ? List.of() : collectionIds
+        );
+        replaceCollectionLinks(packageId, normalizedCollectionIds);
+
+        pkg.touch();
+        packageRepository.save(pkg);
+        operationLogService.record(
+                actor.getId(), "package.upload_metadata.replace", "knowledge_package", packageId,
+                Map.of(
+                        "tag_count", normalizedTagNames.size(),
+                        "collection_count", normalizedCollectionIds.size()
+                ), ip
+        );
+        searchIndexUpdates.refreshPackageAfterCommit(packageId);
         return pkg;
     }
 
@@ -122,10 +167,7 @@ public class PackageService {
             pkg.setTitle(normalizeTitle(command.title()));
         }
         if (command.descriptionPresent()) {
-            if (command.description() != null && command.description().length() > 10_000) {
-                throw new ApiException(ErrorCode.BAD_REQUEST, "description 不能超过 10000 字符");
-            }
-            pkg.setDescription(command.description());
+            pkg.setDescription(normalizeDescription(command.description()));
         }
         if (command.statusPresent()) {
             KnowledgePackage.Status nextStatus = parseStatus(command.status());
@@ -271,38 +313,8 @@ public class PackageService {
             String ip
     ) {
         KnowledgePackage pkg = lockWritablePackage(packageId, actor);
-        if (tagNames == null) {
-            throw new ApiException(ErrorCode.BAD_REQUEST);
-        }
-        enforceTagCount(tagNames);
-
-        LinkedHashSet<String> normalizedNames = new LinkedHashSet<>();
-        for (String rawName : tagNames) {
-            normalizedNames.add(normalizeTagName(rawName));
-        }
-
-        List<Tag> requestedTags = resolveTags(normalizedNames);
-
-        LinkedHashSet<UUID> requestedIds = new LinkedHashSet<>();
-        requestedTags.forEach(tag -> requestedIds.add(tag.getId()));
-        List<PackageTag> existingLinks = packageTagRepository.findAllByIdPackageId(packageId);
-        LinkedHashSet<UUID> existingIds = new LinkedHashSet<>();
-        existingLinks.forEach(link -> existingIds.add(link.getId().getTagId()));
-
-        List<PackageTag> removedLinks = existingLinks.stream()
-                .filter(link -> !requestedIds.contains(link.getId().getTagId()))
-                .toList();
-        if (!removedLinks.isEmpty()) {
-            packageTagRepository.deleteAll(removedLinks);
-        }
-
-        List<PackageTag> addedLinks = requestedIds.stream()
-                .filter(tagId -> !existingIds.contains(tagId))
-                .map(tagId -> new PackageTag(new PackageTagId(packageId, tagId)))
-                .toList();
-        if (!addedLinks.isEmpty()) {
-            packageTagRepository.saveAll(addedLinks);
-        }
+        LinkedHashSet<String> normalizedNames = normalizeTagNames(tagNames);
+        replaceTagLinks(packageId, normalizedNames);
 
         pkg.touch();
         packageRepository.save(pkg);
@@ -326,6 +338,61 @@ public class PackageService {
                     "单次最多设置 " + MAX_TAGS_PER_REQUEST + " 个标签"
             );
         }
+    }
+
+    private LinkedHashSet<String> normalizeTagNames(List<String> tagNames) {
+        if (tagNames == null) {
+            throw new ApiException(ErrorCode.BAD_REQUEST);
+        }
+        enforceTagCount(tagNames);
+        LinkedHashSet<String> normalizedNames = new LinkedHashSet<>();
+        for (String rawName : tagNames) {
+            normalizedNames.add(normalizeTagName(rawName));
+        }
+        return normalizedNames;
+    }
+
+    private void replaceTagLinks(UUID packageId, LinkedHashSet<String> normalizedNames) {
+        List<Tag> requestedTags = resolveTags(normalizedNames);
+        LinkedHashSet<UUID> requestedIds = new LinkedHashSet<>();
+        requestedTags.forEach(tag -> requestedIds.add(tag.getId()));
+        List<PackageTag> existingLinks = packageTagRepository.findAllByIdPackageId(packageId);
+        LinkedHashSet<UUID> existingIds = new LinkedHashSet<>();
+        existingLinks.forEach(link -> existingIds.add(link.getId().getTagId()));
+
+        List<PackageTag> removedLinks = existingLinks.stream()
+                .filter(link -> !requestedIds.contains(link.getId().getTagId()))
+                .toList();
+        if (!removedLinks.isEmpty()) packageTagRepository.deleteAll(removedLinks);
+
+        List<PackageTag> addedLinks = requestedIds.stream()
+                .filter(tagId -> !existingIds.contains(tagId))
+                .map(tagId -> new PackageTag(new PackageTagId(packageId, tagId)))
+                .toList();
+        if (!addedLinks.isEmpty()) packageTagRepository.saveAll(addedLinks);
+    }
+
+    private void replaceCollectionLinks(UUID packageId, LinkedHashSet<UUID> requestedIds) {
+        List<CollectionEntity> requestedCollections = collectionRepository.findAllById(requestedIds);
+        if (requestedCollections.size() != requestedIds.size()) {
+            throw new ApiException(ErrorCode.NOT_FOUND, "集合不存在");
+        }
+        List<PackageCollection> existingLinks = packageCollectionRepository.findAllByIdPackageId(packageId);
+        Set<UUID> existingIds = new LinkedHashSet<>();
+        existingLinks.forEach(link -> existingIds.add(link.getId().getCollectionId()));
+
+        List<PackageCollection> removedLinks = existingLinks.stream()
+                .filter(link -> !requestedIds.contains(link.getId().getCollectionId()))
+                .toList();
+        if (!removedLinks.isEmpty()) packageCollectionRepository.deleteAll(removedLinks);
+
+        List<PackageCollection> addedLinks = requestedIds.stream()
+                .filter(collectionId -> !existingIds.contains(collectionId))
+                .map(collectionId -> new PackageCollection(
+                        new PackageCollectionId(packageId, collectionId)
+                ))
+                .toList();
+        if (!addedLinks.isEmpty()) packageCollectionRepository.saveAll(addedLinks);
     }
 
     private List<Tag> resolveTags(LinkedHashSet<String> normalizedNames) {
@@ -405,14 +472,21 @@ public class PackageService {
         accessService.requireWritable(packageId, actor);
         KnowledgePackage pkg = packageRepository.findActiveByIdForUpdate(packageId)
                 .orElseThrow(() -> new ApiException(ErrorCode.PACKAGE_NOT_FOUND));
-        versionRepository.findActiveByIdAndPackageIdForUpdate(versionId, packageId)
+        PackageVersion version = versionRepository.findActiveByIdAndPackageIdForUpdate(versionId, packageId)
                 .orElseThrow(() -> new ApiException(ErrorCode.VERSION_NOT_FOUND));
+        if (version.getParseStatus() != PackageVersion.ParseStatus.success) {
+            throw new ApiException(ErrorCode.CONFLICT, "只能将解析成功的版本设为当前版本");
+        }
         pkg.setCurrentVersionId(versionId);
+        pkg.setCoverAssetPath(PackageCoverSelector.select(
+                assetRepository.findByVersionIdOrderByPathAsc(versionId)
+        ));
         packageRepository.save(pkg);
         operationLogService.record(
                 actor.getId(), "version.set_current", "package_version", versionId,
                 Map.of("package_id", packageId.toString()), ip
         );
+        searchIndexUpdates.refreshPackageAfterCommit(packageId);
         return pkg;
     }
 
@@ -468,6 +542,22 @@ public class PackageService {
         String normalized = title == null || title.isBlank() ? "未命名知识包" : title.trim();
         if (normalized.length() > 256) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "title 不能超过 256 字符");
+        }
+        return normalized;
+    }
+
+    private String normalizeDescription(String description) {
+        if (description != null && description.length() > 10_000) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "description 不能超过 10000 字符");
+        }
+        return description;
+    }
+
+    private String normalizeSourceName(String sourceName) {
+        if (sourceName == null || sourceName.isBlank()) return null;
+        String normalized = sourceName.trim();
+        if (normalized.length() > 64) {
+            throw new ApiException(ErrorCode.BAD_REQUEST, "source_name 不能超过 64 字符");
         }
         return normalized;
     }

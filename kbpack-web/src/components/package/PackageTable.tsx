@@ -1,6 +1,6 @@
 import { DownloadOutlined, EyeOutlined, StarFilled, StarOutlined } from '@ant-design/icons';
 import { Button, Space, Table, Tooltip, Typography, type TableColumnsType } from 'antd';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { PackageListItem } from '../../api/packages';
 import { packageDownloadUrl } from '../../api/packages';
 import { formatBytes, formatRelativeDate } from '../../utils/format';
@@ -23,7 +23,9 @@ export function PackageTable({
       width: 330,
       render: (_, item) => (
         <div className="table-title-cell">
-          <Typography.Text strong>{item.title}</Typography.Text>
+          <Link className="table-title-link" to={`/packages/${item.id}`}>
+            {item.title}
+          </Link>
           <Typography.Text type="secondary" ellipsis>
             {(item.tags || []).join(' · ') || '暂无标签'}
           </Typography.Text>
@@ -58,7 +60,7 @@ export function PackageTable({
       width: 142,
       align: 'right',
       render: (_, item) => (
-        <Space size={2} onClick={(event) => event.stopPropagation()}>
+        <Space size={2}>
           <Tooltip title={item.is_favorite ? '取消收藏' : '收藏'}>
             <Button
               type="text"
@@ -103,7 +105,6 @@ export function PackageTable({
       loading={loading}
       pagination={false}
       scroll={{ x: 940 }}
-      onRow={(item) => ({ onClick: () => navigate(`/packages/${item.id}`) })}
     />
   );
 }

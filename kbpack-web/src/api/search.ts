@@ -4,8 +4,12 @@ import { apiClient } from './client';
 export interface SearchResult {
   package_id: string;
   package_title: string;
+  version_id: string;
+  version_no?: number;
+  is_current?: boolean;
   document_id: string;
   document_title: string;
+  heading?: string;
   snippet: string;
   tags: string[];
   updated_at: string;
@@ -22,6 +26,7 @@ export interface SearchFilters {
   page?: number;
   page_size?: number;
   package_id?: string;
+  version_scope?: 'current' | 'history' | 'all';
 }
 
 export async function searchKnowledge(filters: SearchFilters) {

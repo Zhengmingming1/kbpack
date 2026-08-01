@@ -11,6 +11,7 @@ import {
 } from '../api/collections';
 import { getApiErrorMessage } from '../api/client';
 import { EmptyBlock, ErrorBlock } from '../components/common/QueryState';
+import { useSession } from '../hooks/useSession';
 
 interface FlatCollection extends CollectionItem { depth: number }
 
@@ -22,14 +23,29 @@ function treeData(items: CollectionItem[]): Array<{ key: string; title: string; 
   return items.map((item) => ({ key: item.id, title: item.name, icon: <FolderOutlined />, children: treeData(item.children || []) }));
 }
 
+function descendantIds(item: CollectionItem | undefined, result = new Set<string>()) {
+  for (const child of item?.children || []) {
+    result.add(child.id);
+    descendantIds(child, result);
+  }
+  return result;
+}
+
 export function CollectionManagePage() {
   const queryClient = useQueryClient();
   const { message, modal } = App.useApp();
+  const session = useSession();
+  const canManage = session.data?.role?.toLowerCase() !== 'viewer';
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CollectionItem>();
   const [form] = Form.useForm<{ name: string; parent_id?: string; sort_order?: number }>();
   const collections = useQuery({ queryKey: ['collections'], queryFn: listCollections });
   const flat = useMemo(() => flatten(collections.data || []), [collections.data]);
+  const blockedParentIds = useMemo(() => {
+    const blocked = descendantIds(editing);
+    if (editing) blocked.add(editing.id);
+    return blocked;
+  }, [editing]);
 
   const saveMutation = useMutation({
     mutationFn: (values: { name: string; parent_id?: string; sort_order?: number }) =>
@@ -74,6 +90,18 @@ export function CollectionManagePage() {
     });
   };
 
+  const actionColumn: TableColumnsType<FlatCollection>[number] = {
+    title: '操作',
+    width: 130,
+    align: 'right',
+    render: (_, item) => (
+      <Space size={2}>
+        <Button type="text" icon={<PlusOutlined />} aria-label={`在${item.name}下新建集合`} onClick={() => openCreate(item.id)} />
+        <Button type="text" icon={<EditOutlined />} aria-label={`编辑${item.name}`} onClick={() => openEdit(item)} />
+        <Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除${item.name}`} onClick={() => confirmDelete(item)} />
+      </Space>
+    ),
+  };
   const columns: TableColumnsType<FlatCollection> = [
     {
       title: '集合名称',
@@ -82,32 +110,21 @@ export function CollectionManagePage() {
     },
     { title: '知识包', dataIndex: 'package_count', width: 100, render: (value) => value ?? '—' },
     { title: '排序', dataIndex: 'sort_order', width: 80, render: (value) => value ?? 0 },
-    {
-      title: '操作',
-      width: 130,
-      align: 'right',
-      render: (_, item) => (
-        <Space size={2}>
-          <Button type="text" icon={<PlusOutlined />} aria-label={`在${item.name}下新建集合`} onClick={() => openCreate(item.id)} />
-          <Button type="text" icon={<EditOutlined />} aria-label={`编辑${item.name}`} onClick={() => openEdit(item)} />
-          <Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除${item.name}`} onClick={() => confirmDelete(item)} />
-        </Space>
-      ),
-    },
+    ...(canManage ? [actionColumn] : []),
   ];
 
   return (
     <div className="management-page">
       <div className="page-heading">
         <div>
-          <span className="eyebrow">Collections</span>
+          <span className="eyebrow">集合体系</span>
           <Typography.Title level={1}>集合管理</Typography.Title>
           <Typography.Paragraph type="secondary">使用层级集合组织项目、主题和资料来源。</Typography.Paragraph>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreate()}>新建集合</Button>
+        {canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreate()}>新建集合</Button> : null}
       </div>
       {collections.isError ? <ErrorBlock description={getApiErrorMessage(collections.error)} onRetry={() => void collections.refetch()} /> : null}
-      {!collections.isPending && !collections.isError && flat.length === 0 ? <EmptyBlock title="还没有集合" action={<Button type="primary" onClick={() => openCreate()}>新建第一个集合</Button>} /> : null}
+      {!collections.isPending && !collections.isError && flat.length === 0 ? <EmptyBlock title="还没有集合" action={canManage ? <Button type="primary" onClick={() => openCreate()}>新建第一个集合</Button> : undefined} /> : null}
       <div className="collection-layout">
         <aside className="surface surface-pad collection-tree-panel">
           <div className="section-heading"><h3>集合结构</h3></div>
@@ -124,7 +141,7 @@ export function CollectionManagePage() {
             <Input autoFocus />
           </Form.Item>
           <Form.Item name="parent_id" label="上级集合">
-            <Select allowClear placeholder="无（顶级集合）" options={flat.filter((item) => item.id !== editing?.id).map((item) => ({ value: item.id, label: `${'　'.repeat(item.depth)}${item.name}` }))} />
+            <Select allowClear placeholder="无（顶级集合）" options={flat.filter((item) => !blockedParentIds.has(item.id)).map((item) => ({ value: item.id, label: `${'　'.repeat(item.depth)}${item.name}` }))} />
           </Form.Item>
           <Form.Item name="sort_order" label="排序值">
             <InputNumber min={0} max={9999} style={{ width: '100%' }} />

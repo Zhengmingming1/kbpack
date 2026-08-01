@@ -44,7 +44,6 @@ public class UploadService {
     private final UploadLimitService uploadLimitService;
     private final OperationLogService operationLogService;
     private final PackageService packageService;
-    private final KnowledgePackageRepository packageRepository;
     private final PackageVersionRepository versionRepository;
     private final PackageAssetRepository assetRepository;
     private final ParseTaskRepository taskRepository;
@@ -54,7 +53,6 @@ public class UploadService {
             UploadLimitService uploadLimitService,
             OperationLogService operationLogService,
             PackageService packageService,
-            KnowledgePackageRepository packageRepository,
             PackageVersionRepository versionRepository,
             PackageAssetRepository assetRepository,
             ParseTaskRepository taskRepository,
@@ -63,7 +61,6 @@ public class UploadService {
         this.uploadLimitService = uploadLimitService;
         this.operationLogService = operationLogService;
         this.packageService = packageService;
-        this.packageRepository = packageRepository;
         this.versionRepository = versionRepository;
         this.assetRepository = assetRepository;
         this.taskRepository = taskRepository;
@@ -116,6 +113,7 @@ public class UploadService {
 
             KnowledgePackage pkg = resolvePackage(metadata, user);
             ensureNotDuplicate(pkg.getId(), contentHash);
+            versionRepository.clearPromotionCandidates(pkg.getId());
 
             Path unpacked = Files.createDirectories(work.resolve("unpacked"));
             List<InspectedFile> files = inspectAndExtract(original, filename, type, unpacked, limits);
@@ -134,6 +132,7 @@ public class UploadService {
             version.setFileCount(files.size());
             version.setCreatedBy(user.getId());
             version.setParseStatus(PackageVersion.ParseStatus.pending);
+            version.setPromoteOnSuccess(true);
             version.setStoragePath("pending");
             versionRepository.saveAndFlush(version);
 
@@ -162,22 +161,12 @@ public class UploadService {
 
             version.setStoragePath(originalKey);
             versionRepository.save(version);
-            pkg.setCurrentVersionId(version.getId());
-            packageRepository.save(pkg);
 
             ParseTask task = new ParseTask();
             task.setVersionId(version.getId());
             task.setTaskType(ParseTask.TaskType.parse);
             task.setStatus(ParseTask.Status.pending);
             taskRepository.save(task);
-            if (metadata.tagNames() != null && !metadata.tagNames().isEmpty()) {
-                packageService.addTags(pkg.getId(), metadata.tagNames(), user, metadata.requestIp());
-            }
-            if (metadata.collectionIds() != null) {
-                for (UUID collectionId : metadata.collectionIds()) {
-                    packageService.addCollection(pkg.getId(), collectionId, user, metadata.requestIp());
-                }
-            }
             operationLogService.record(user.getId(), "package.upload", "package_version", version.getId(),
                     java.util.Map.of(
                             "package_id", pkg.getId().toString(),
@@ -197,15 +186,35 @@ public class UploadService {
     }
 
     private KnowledgePackage resolvePackage(UploadMetadata metadata, AppUser user) {
+        KnowledgePackage pkg;
         if (metadata.targetPackageId() == null) {
-            return packageService.createDraft(metadata.title(), metadata.description(), metadata.sourceType(),
+            pkg = packageService.createDraft(metadata.title(), metadata.description(), metadata.sourceType(),
                     metadata.sourceName(), user.getId());
+        } else {
+            pkg = packageService.replaceUploadMetadata(
+                    metadata.targetPackageId(),
+                    metadata.title(),
+                    metadata.description(),
+                    metadata.sourceType(),
+                    metadata.sourceName(),
+                    metadata.tagNames(),
+                    metadata.collectionIds(),
+                    user,
+                    metadata.requestIp()
+            );
         }
-        KnowledgePackage pkg = packageRepository.findActiveById(metadata.targetPackageId())
-                .orElseThrow(() -> new ApiException(ErrorCode.PACKAGE_NOT_FOUND));
-        boolean privileged = user.getRole() == AppUser.Role.owner || user.getRole() == AppUser.Role.admin;
-        if (!pkg.getOwnerId().equals(user.getId()) && !privileged) {
-            throw new ApiException(ErrorCode.PACKAGE_NOT_FOUND);
+        if (metadata.targetPackageId() == null) {
+            pkg = packageService.replaceUploadMetadata(
+                    pkg.getId(),
+                    metadata.title(),
+                    metadata.description(),
+                    metadata.sourceType(),
+                    metadata.sourceName(),
+                    metadata.tagNames(),
+                    metadata.collectionIds(),
+                    user,
+                    metadata.requestIp()
+            );
         }
         return pkg;
     }

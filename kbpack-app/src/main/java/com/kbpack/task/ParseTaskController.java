@@ -82,15 +82,17 @@ public class ParseTaskController {
             return cb.and(predicates.toArray(jakarta.persistence.criteria.Predicate[]::new));
         };
         Page<ParseTask> result = taskRepository.findAll(specification, pageable);
-        return PageResponse.of(result.getTotalElements(), currentPage, size, result.stream().map(this::view).toList());
+        return PageResponse.of(result.getTotalElements(), currentPage, size,
+                result.stream().map(task -> view(task, user)).toList());
     }
 
     @GetMapping("/{taskId}")
     public Map<String, Object> detail(@PathVariable String taskId, Authentication authentication) {
         ParseTask task = taskRepository.findById(parseRequired(taskId, IdPrefix.TASK))
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "解析任务不存在"));
-        requireReadable(task, currentUser(authentication));
-        return view(task);
+        AppUser user = currentUser(authentication);
+        requireReadable(task, user);
+        return view(task, user);
     }
 
     @PostMapping("/{taskId}/retry")
@@ -106,10 +108,18 @@ public class ParseTaskController {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of("status", task.getStatus().name()));
     }
 
-    private Map<String, Object> view(ParseTask task) {
+    private Map<String, Object> view(ParseTask task, AppUser user) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", IdPrefix.TASK.format(task.getId()));
         result.put("version_id", IdPrefix.VERSION.format(task.getVersionId()));
+        versionRepository.findActiveById(task.getVersionId()).ifPresent(version -> {
+            packageRepository.findActiveById(version.getPackageId()).ifPresent(pkg -> {
+                result.put("package_id", IdPrefix.PACKAGE.format(pkg.getId()));
+                result.put("package_title", pkg.getTitle());
+                result.put("can_retry", isAdministrator(user)
+                        || (user.getRole() == AppUser.Role.editor && pkg.getOwnerId().equals(user.getId())));
+            });
+        });
         result.put("task_type", task.getTaskType().name());
         result.put("status", task.getStatus().name());
         result.put("attempt_count", task.getAttemptCount());

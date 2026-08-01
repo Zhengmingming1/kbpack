@@ -3,6 +3,7 @@ import {
   CloudUploadOutlined,
   FileZipOutlined,
   InboxOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -125,6 +126,13 @@ export function UploadPage() {
   const isParsing = parseStatus === 'pending' || parseStatus === 'processing';
   const isSuccess = parseStatus === 'success';
   const isFailed = parseStatus === 'failed';
+  const parseOutcome = isSuccess
+    ? 'success'
+    : isFailed
+      ? 'failed'
+      : version.isError || !isParsing
+        ? 'unknown'
+        : 'running';
   const collectionOptions = flattenCollections(collections.data || []);
 
   const chooseFile = (
@@ -253,23 +261,43 @@ export function UploadPage() {
 
   const parsePreview = (
     <div className="upload-step-panel parse-panel">
-      <div className={`parse-indicator ${isFailed ? 'failed' : isSuccess ? 'success' : ''}`}>
-        {isSuccess ? <CheckCircleOutlined /> : <CloudUploadOutlined />}
+      <div className={`parse-indicator ${parseOutcome === 'failed' ? 'failed' : parseOutcome === 'success' ? 'success' : ''}`}>
+        {parseOutcome === 'success'
+          ? <CheckCircleOutlined />
+          : parseOutcome === 'unknown'
+            ? <QuestionCircleOutlined />
+            : <CloudUploadOutlined />}
       </div>
       <Typography.Title level={3}>
-        {isSuccess ? '解析完成' : isFailed ? '解析失败' : '正在解析知识包'}
+        {parseOutcome === 'success'
+          ? '解析完成'
+          : parseOutcome === 'failed'
+            ? '解析失败'
+            : parseOutcome === 'unknown'
+              ? '解析状态暂时无法确认'
+              : '正在解析知识包'}
       </Typography.Title>
       <Typography.Paragraph type="secondary">
-        {isSuccess
+        {parseOutcome === 'success'
           ? '入口文件、章节和索引已经准备完成。'
-          : isFailed
+          : parseOutcome === 'failed'
             ? version.data?.parse_error || '原始文件已保存，可在详情页指定入口后重新解析。'
-            : '任务在后台继续执行，离开页面不会中断解析。'}
+            : parseOutcome === 'unknown'
+              ? '文件已经保存，但当前无法读取解析进度。可稍后在详情页确认结果。'
+              : '任务在后台继续执行，离开页面不会中断解析。'}
       </Typography.Paragraph>
       <div className="parse-stages">
         <Progress
-          percent={isSuccess || isFailed ? 100 : parseStatus === 'processing' ? 68 : 28}
-          status={isFailed ? 'exception' : isSuccess ? 'success' : 'active'}
+          percent={parseOutcome === 'unknown' ? 0 : isSuccess || isFailed ? 100 : parseStatus === 'processing' ? 68 : 28}
+          status={
+            parseOutcome === 'failed'
+              ? 'exception'
+              : parseOutcome === 'success'
+                ? 'success'
+                : parseOutcome === 'unknown'
+                  ? 'normal'
+                  : 'active'
+          }
           showInfo={false}
         />
         <Space wrap>
@@ -291,7 +319,7 @@ export function UploadPage() {
       <div className="upload-step-actions">
         <Button onClick={() => result && navigate(`/packages/${result.package_id}`)}>在详情页查看</Button>
         <Button type="primary" disabled={isParsing && !version.isError} onClick={() => setCurrent(3)}>
-          {isFailed ? '完成' : '下一步'}
+          {parseOutcome === 'success' ? '下一步' : parseOutcome === 'failed' ? '完成' : '稍后查看'}
         </Button>
       </div>
     </div>
@@ -299,9 +327,21 @@ export function UploadPage() {
 
   const done = (
     <Result
-      status={isFailed ? 'warning' : 'success'}
-      title={isFailed ? '文件已保存，解析需要处理' : '知识包已入库'}
-      subTitle={isFailed ? '可以进入详情页手工指定入口文件并重新解析。' : '现在可以预览原始内容或进入详情查看章节。'}
+      status={parseOutcome === 'failed' ? 'warning' : parseOutcome === 'success' ? 'success' : 'info'}
+      title={
+        parseOutcome === 'failed'
+          ? '文件已保存，解析需要处理'
+          : parseOutcome === 'success'
+            ? '知识包已入库'
+            : '文件已保存，解析状态待确认'
+      }
+      subTitle={
+        parseOutcome === 'failed'
+          ? '可以进入详情页手工指定入口文件并重新解析。'
+          : parseOutcome === 'success'
+            ? '现在可以预览原始内容或进入详情查看章节。'
+            : '后台任务可能仍在继续，请稍后从详情页刷新状态。'
+      }
       extra={[
         <Button key="detail" type="primary" onClick={() => result && navigate(`/packages/${result.package_id}`)}>查看详情</Button>,
         isSuccess && result ? <Button key="preview" onClick={() => navigate(`/packages/${result.package_id}/preview/${result.version_id}`)}>原样预览</Button> : null,
@@ -321,7 +361,7 @@ export function UploadPage() {
     <div className="upload-page">
       <div className="page-heading">
         <div>
-          <span className="eyebrow">Ingest knowledge</span>
+          <span className="eyebrow">内容导入</span>
           <Typography.Title level={1}>{targetPackageId ? '上传新版本' : '上传知识包'}</Typography.Title>
           <Typography.Paragraph type="secondary">文件上传后由后台完成安全校验、内容抽取和索引建立。</Typography.Paragraph>
         </div>

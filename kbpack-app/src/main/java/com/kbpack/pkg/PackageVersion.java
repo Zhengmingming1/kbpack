@@ -66,6 +66,9 @@ public class PackageVersion {
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
+    @Column(name = "promote_on_success", nullable = false)
+    private boolean promoteOnSuccess;
+
     @Version
     @Column(name = "lock_version", nullable = false)
     private long lockVersion;
@@ -102,5 +105,7 @@ public class PackageVersion {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getDeletedAt() { return deletedAt; }
     public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
+    public boolean isPromoteOnSuccess() { return promoteOnSuccess; }
+    public void setPromoteOnSuccess(boolean promoteOnSuccess) { this.promoteOnSuccess = promoteOnSuccess; }
     public long getLockVersion() { return lockVersion; }
 }

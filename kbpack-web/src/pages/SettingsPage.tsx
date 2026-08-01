@@ -63,7 +63,7 @@ export function SettingsPage() {
     <div className="settings-page management-page">
       <div className="page-heading">
         <div>
-          <span className="eyebrow">System control</span>
+          <span className="eyebrow">系统管理</span>
           <Typography.Title level={1}>系统设置</Typography.Title>
           <Typography.Paragraph type="secondary">管理上传限制、后台任务和预览会话参数。</Typography.Paragraph>
         </div>

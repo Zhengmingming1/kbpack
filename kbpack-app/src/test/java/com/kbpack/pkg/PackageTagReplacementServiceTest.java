@@ -28,6 +28,7 @@ class PackageTagReplacementServiceTest {
 
     @Mock private KnowledgePackageRepository packageRepository;
     @Mock private PackageVersionRepository versionRepository;
+    @Mock private PackageAssetRepository assetRepository;
     @Mock private TagRepository tagRepository;
     @Mock private PackageTagRepository packageTagRepository;
     @Mock private CollectionRepository collectionRepository;

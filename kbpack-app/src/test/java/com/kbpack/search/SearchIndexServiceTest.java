@@ -134,6 +134,7 @@ class SearchIndexServiceTest {
             UUID documentId = UUID.randomUUID();
             KnowledgePackage pkg = mock(KnowledgePackage.class);
             when(pkg.getId()).thenReturn(packageId);
+            when(pkg.getCurrentVersionId()).thenReturn(versionId);
             when(pkg.getTitle()).thenReturn("Package");
             when(pkg.getStatus()).thenReturn(KnowledgePackage.Status.active);
             when(pkg.getSourceType()).thenReturn(KnowledgePackage.SourceType.manual);
@@ -152,7 +153,9 @@ class SearchIndexServiceTest {
             when(chunk.getDocumentId()).thenReturn(documentId);
             when(chunk.getContent()).thenReturn("content");
             PackageVersion version = mock(PackageVersion.class);
+            when(version.getId()).thenReturn(versionId);
             when(version.getEntryFile()).thenReturn("guide.md");
+            when(version.getParseStatus()).thenReturn(PackageVersion.ParseStatus.success);
             when(documents.findAll()).thenReturn(List.of(document));
             when(packages.findAll()).thenReturn(List.of(pkg));
             when(chunks.findAll()).thenReturn(List.of(chunk));

@@ -25,6 +25,18 @@ public interface KnowledgePackageRepository extends JpaRepository<KnowledgePacka
     @Query("select p from KnowledgePackage p where p.id = :id and p.deletedAt is null")
     Optional<KnowledgePackage> findActiveByIdForUpdate(@Param("id") UUID id);
 
+    @Query("select p from KnowledgePackage p where p.deletedAt is not null "
+            + "and (:administrator = true or p.ownerId = :userId)")
+    Page<KnowledgePackage> findDeletedVisibleTo(
+            @Param("userId") UUID userId,
+            @Param("administrator") boolean administrator,
+            Pageable pageable
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from KnowledgePackage p where p.id = :id and p.deletedAt is not null")
+    Optional<KnowledgePackage> findDeletedByIdForUpdate(@Param("id") UUID id);
+
     boolean existsBySlug(String slug);
 
     @Query("select count(p) from KnowledgePackage p where p.deletedAt is null")

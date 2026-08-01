@@ -6,11 +6,14 @@ import { Link } from 'react-router-dom';
 import { getApiErrorMessage } from '../api/client';
 import { createTag, deleteTag, listTags, type TagItem } from '../api/tags';
 import { EmptyBlock, ErrorBlock } from '../components/common/QueryState';
+import { useSession } from '../hooks/useSession';
 import { formatDate } from '../utils/format';
 
 export function TagManagePage() {
   const queryClient = useQueryClient();
   const { message, modal } = App.useApp();
+  const session = useSession();
+  const canManage = session.data?.role?.toLowerCase() !== 'viewer';
   const [createOpen, setCreateOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [form] = Form.useForm<{ name: string }>();
@@ -51,6 +54,12 @@ export function TagManagePage() {
     });
   };
 
+  const actionColumn: TableColumnsType<TagItem>[number] = {
+    title: '操作',
+    width: 90,
+    align: 'right',
+    render: (_, tag) => <Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除${tag.name}`} onClick={() => confirmDelete(tag)} />,
+  };
   const columns: TableColumnsType<TagItem> = [
     {
       title: '标签',
@@ -59,23 +68,18 @@ export function TagManagePage() {
     },
     { title: '知识包', dataIndex: 'package_count', width: 120, render: (value) => value ?? '—' },
     { title: '创建时间', dataIndex: 'created_at', width: 180, render: (value) => formatDate(value) },
-    {
-      title: '操作',
-      width: 90,
-      align: 'right',
-      render: (_, tag) => <Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除${tag.name}`} onClick={() => confirmDelete(tag)} />,
-    },
+    ...(canManage ? [actionColumn] : []),
   ];
 
   return (
     <div className="management-page">
       <div className="page-heading">
         <div>
-          <span className="eyebrow">Taxonomy</span>
+          <span className="eyebrow">标签体系</span>
           <Typography.Title level={1}>标签管理</Typography.Title>
           <Typography.Paragraph type="secondary">维护跨知识包使用的主题标签。</Typography.Paragraph>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建标签</Button>
+        {canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>新建标签</Button> : null}
       </div>
       <div className="toolbar-row">
         <Input prefix={<SearchOutlined />} allowClear placeholder="查找标签" value={keyword} onChange={(event) => setKeyword(event.target.value)} />

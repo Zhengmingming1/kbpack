@@ -55,12 +55,19 @@ public class PackageViewService {
         body.put("tags", tagNames(pkg.getId()));
         body.put("collections", collectionViews(pkg.getId()));
         body.put("is_favorite", favoriteRepository.existsByIdUserIdAndIdPackageId(user.getId(), pkg.getId()));
+        boolean canManage = canManage(pkg, user);
+        body.put("can_edit", canManage);
+        body.put("can_delete", canManage);
+        body.put("can_reparse", canManage);
+        body.put("can_manage_versions", canManage);
         body.put("created_at", pkg.getCreatedAt().toString());
         body.put("updated_at", pkg.getUpdatedAt().toString());
 
         PackageVersion currentVersion = pkg.getCurrentVersionId() == null
                 ? null
-                : versionRepository.findActiveById(pkg.getCurrentVersionId()).orElse(null);
+                : (pkg.getDeletedAt() == null
+                        ? versionRepository.findActiveById(pkg.getCurrentVersionId()).orElse(null)
+                        : versionRepository.findById(pkg.getCurrentVersionId()).orElse(null));
         if (currentVersion == null) {
             body.put("current_version", null);
             body.put("file_count", 0);
@@ -193,5 +200,16 @@ public class PackageViewService {
             return contentHash;
         }
         return "sha256:" + contentHash;
+    }
+
+    private boolean canManage(KnowledgePackage pkg, AppUser user) {
+        if (pkg.getDeletedAt() != null) {
+            return false;
+        }
+        boolean administrator = user.getRole() == AppUser.Role.owner
+                || user.getRole() == AppUser.Role.admin;
+        boolean editorOwner = user.getRole() == AppUser.Role.editor
+                && user.getId().equals(pkg.getOwnerId());
+        return administrator || editorOwner;
     }
 }

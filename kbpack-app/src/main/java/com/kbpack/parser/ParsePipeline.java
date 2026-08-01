@@ -10,6 +10,7 @@ import com.kbpack.pkg.KnowledgePackage;
 import com.kbpack.pkg.KnowledgePackageRepository;
 import com.kbpack.pkg.PackageAsset;
 import com.kbpack.pkg.PackageAssetRepository;
+import com.kbpack.pkg.PackageCoverSelector;
 import com.kbpack.pkg.PackageVersion;
 import com.kbpack.pkg.PackageVersionRepository;
 import com.kbpack.search.SearchIndexUpdateCoordinator;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -59,9 +61,9 @@ public class ParsePipeline {
 
     @Transactional
     public void process(UUID versionId) {
-        PackageVersion reference = versionRepository.findActiveById(versionId)
+        UUID packageUuid = versionRepository.findActivePackageIdById(versionId)
                 .orElseThrow(() -> new ApiException(ErrorCode.VERSION_NOT_FOUND));
-        KnowledgePackage pkg = packageRepository.findActiveByIdForUpdate(reference.getPackageId())
+        KnowledgePackage pkg = packageRepository.findActiveByIdForUpdate(packageUuid)
                 .orElseThrow(() -> new ApiException(ErrorCode.PACKAGE_NOT_FOUND));
         PackageVersion version = versionRepository.findActiveByIdAndPackageIdForUpdate(versionId, pkg.getId())
                 .orElseThrow(() -> new ApiException(ErrorCode.VERSION_NOT_FOUND));
@@ -70,10 +72,11 @@ public class ParsePipeline {
         versionRepository.save(version);
 
         Map<String, byte[]> files = new LinkedHashMap<>();
+        List<PackageAsset> assets = assetRepository.findByVersionIdOrderByPathAsc(versionId);
         String packageId = IdPrefix.PACKAGE.format(pkg.getId());
         String externalVersionId = IdPrefix.VERSION.format(version.getId());
         long loadedBytes = 0;
-        for (PackageAsset asset : assetRepository.findByVersionIdOrderByPathAsc(versionId)) {
+        for (PackageAsset asset : assets) {
             if (!isParseCandidate(asset)) continue;
             if (asset.getSize() > properties.getParser().getMaxTextFileBytes()) {
                 if (asset.getPath().equals(version.getEntryFile())) {
@@ -129,7 +132,19 @@ public class ParsePipeline {
             }
         }
 
+        boolean promoteOnSuccess = version.isPromoteOnSuccess()
+                && versionRepository.findPromotionCandidates(pkg.getId()).stream()
+                .findFirst()
+                .map(candidate -> candidate.getId().equals(versionId))
+                .orElse(false);
+        if (promoteOnSuccess) {
+            pkg.setCurrentVersionId(versionId);
+            version.setPromoteOnSuccess(false);
+        }
         boolean isCurrentVersion = versionId.equals(pkg.getCurrentVersionId());
+        if (isCurrentVersion) {
+            pkg.setCoverAssetPath(PackageCoverSelector.select(assets));
+        }
         if (isCurrentVersion && result.qualityMeta() != null) {
             pkg.setQualityMeta(result.qualityMeta());
         }

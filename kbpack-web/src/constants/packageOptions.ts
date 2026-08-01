@@ -12,6 +12,19 @@ export const PACKAGE_STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'archived', label: '已归档' },
 ];
 
+const PACKAGE_STATUS_TRANSITIONS: Record<string, string[]> = {
+  draft: ['active'],
+  active: ['deprecated', 'archived'],
+  deprecated: ['archived'],
+  archived: [],
+};
+
+export function packageEditableStatusOptions(currentStatus?: string | null) {
+  if (!currentStatus) return PACKAGE_STATUS_OPTIONS;
+  const allowed = new Set([currentStatus, ...(PACKAGE_STATUS_TRANSITIONS[currentStatus] || [])]);
+  return PACKAGE_STATUS_OPTIONS.filter((option) => allowed.has(option.value));
+}
+
 export const PACKAGE_VISIBILITY_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'private', label: '私有' },
   { value: 'team', label: '团队可见' },

@@ -89,7 +89,9 @@ public class ParseTaskStateService {
         }
         taskRepository.save(task);
         versionRepository.findActiveById(task.getVersionId()).ifPresent(version -> {
-            version.setParseStatus(PackageVersion.ParseStatus.failed);
+            version.setParseStatus(task.getStatus() == ParseTask.Status.retry_scheduled
+                    ? PackageVersion.ParseStatus.pending
+                    : PackageVersion.ParseStatus.failed);
             version.setParseError(task.getErrorMessage());
             versionRepository.save(version);
         });
@@ -98,11 +100,16 @@ public class ParseTaskStateService {
     @Transactional
     public ParseTask retry(UUID taskId) {
         ParseTask task = require(taskId);
-        if (task.getAttemptCount() >= task.getMaxAttempts()) {
-            throw new ApiException(ErrorCode.TASK_MAX_RETRIES);
-        }
         if (task.getStatus() == ParseTask.Status.processing) {
             throw new ApiException(ErrorCode.CONFLICT, "任务正在执行");
+        }
+        if (task.getStatus() == ParseTask.Status.success) {
+            throw new ApiException(ErrorCode.CONFLICT, "任务已经完成");
+        }
+        if (task.getStatus() == ParseTask.Status.failed) {
+            task.setAttemptCount(0);
+        } else if (task.getAttemptCount() >= task.getMaxAttempts()) {
+            throw new ApiException(ErrorCode.TASK_MAX_RETRIES);
         }
         task.setStatus(ParseTask.Status.pending);
         task.setNextRetryAt(null);
